@@ -1,0 +1,6 @@
+game_name,agent_one_kind,agent_one_model,agent_one_temp,agent_one_seed,agent_two_kind,agent_two_model,agent_two_temp,agent_two_seed,repetitions,description
+TicTacToe,OpenAI,gpt-4o-mini,0.7,42,OpenAI,gpt-4o-mini,0.7,43,1,OpenAI vs OpenAI TicTacToe
+RockPaperScissors,Ollama,llama3,0.7,100,Ollama,llama3,0.8,101,3,Best of 3 Rock Paper Scissors
+ConnectFour,Anthropic,claude-3-7-sonnet,0.7,200,OpenAI,gpt-4o-mini,0.7,201,1,Connect Four Championship
+TicTacToe,Ollama,llama3,0.5,300,OpenAI,gpt-4o-mini,0.9,301,2,TicTacToe with different temperatures
+
