@@ -5,7 +5,18 @@ use clap::ValueEnum;
 use rig::prelude::*;
 use rig::providers::anthropic;
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug, serde::Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    Debug,
+    serde::Deserialize,
+    serde::Serialize,
+)]
 pub enum AgentKind {
     #[value(name = "OpenAI", alias = "open-ai", alias = "openai")]
     OpenAI,
@@ -15,7 +26,7 @@ pub enum AgentKind {
     Ollama,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, clap::Args)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Args)]
 pub struct AIAgentConfig {
     pub model: String,
     pub temp: f32,

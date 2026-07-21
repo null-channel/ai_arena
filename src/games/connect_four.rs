@@ -215,6 +215,7 @@ impl ConnectFour {
                     state_before: state_before.clone(),
                     state_after: state_before,
                     diagnostics: None,
+                    token_usage: None,
                 });
                 return Err(error);
             }
@@ -238,6 +239,7 @@ impl ConnectFour {
                     state_before: state_before.clone(),
                     state_after: state_before,
                     diagnostics: move_response.diagnostics,
+                    token_usage: move_response.token_usage,
                 });
                 return Err(error);
             }
@@ -274,6 +276,7 @@ impl ConnectFour {
             state_before,
             state_after,
             diagnostics: move_response.diagnostics,
+            token_usage: move_response.token_usage,
         };
 
         self.stats.add_turn(turn_stats);
