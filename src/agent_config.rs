@@ -7,8 +7,11 @@ use rig::providers::anthropic;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug, serde::Deserialize)]
 pub enum AgentKind {
+    #[value(name = "OpenAI", alias = "open-ai", alias = "openai")]
     OpenAI,
+    #[value(name = "Anthropic", alias = "anthropic")]
     Anthropic,
+    #[value(name = "Ollama", alias = "ollama")]
     Ollama,
 }
 

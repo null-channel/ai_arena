@@ -105,30 +105,22 @@ pub struct ConnectFourResult {
     pub stats: GameStats,
 }
 
-impl From<&str> for Game {
-    fn from(name: &str) -> Self {
+impl TryFrom<&str> for Game {
+    type Error = String;
+
+    fn try_from(name: &str) -> Result<Self, Self::Error> {
         match name {
-            "TicTacToe" => Game::TicTacToe(TicTacToeConfig::default()),
-            "RockPaperScissors" => Game::RockPaperScissors(RockPaperScissorsConfig::default()),
-            "ConnectFour" => Game::ConnectFour(ConnectFourConfig::default()),
-            _ => panic!("Unknown game name: {}", name),
+            "TicTacToe" => Ok(Game::TicTacToe(TicTacToeConfig::default())),
+            "RockPaperScissors" => Ok(Game::RockPaperScissors(RockPaperScissorsConfig::default())),
+            "ConnectFour" => Ok(Game::ConnectFour(ConnectFourConfig::default())),
+            _ => Err(format!(
+                "unknown game '{name}'; expected TicTacToe, RockPaperScissors, or ConnectFour"
+            )),
         }
     }
 }
 
 impl Game {
-    #[allow(dead_code)]
-    pub fn new(name: &str) -> Option<Self> {
-        match name {
-            "TicTacToe" => Some(Game::TicTacToe(TicTacToeConfig::default())),
-            "RockPaperScissors" => {
-                Some(Game::RockPaperScissors(RockPaperScissorsConfig::default()))
-            }
-            "ConnectFour" => Some(Game::ConnectFour(ConnectFourConfig::default())),
-            _ => None,
-        }
-    }
-
     pub fn name(&self) -> &str {
         match self {
             Game::TicTacToe(_) => "TicTacToe",
@@ -138,6 +130,9 @@ impl Game {
     }
 
     pub async fn play_game(&self, agents: Vec<AIAgentConfig>) -> TestResult {
+        if let Err(error) = self.validate() {
+            return self.error_result(error);
+        }
         let agents = match build_agents(agents) {
             Ok(agents) => agents,
             Err(error) => return self.error_result(error.to_string()),
@@ -183,6 +178,37 @@ impl Game {
         }
     }
 
+    fn validate(&self) -> Result<(), String> {
+        match self {
+            Game::TicTacToe(config) => {
+                if config.board_size == 0 {
+                    return Err("TicTacToe board_size must be greater than zero".into());
+                }
+                if config.win_length == 0 || config.win_length > config.board_size {
+                    return Err("TicTacToe win_length must be between 1 and board_size".into());
+                }
+            }
+            Game::RockPaperScissors(config) if config.rounds == 0 => {
+                return Err("RockPaperScissors rounds must be greater than zero".into());
+            }
+            Game::ConnectFour(config) => {
+                if config.rows == 0 || config.cols == 0 {
+                    return Err("ConnectFour rows and cols must be greater than zero".into());
+                }
+                if config.win_length == 0
+                    || config.win_length > std::cmp::max(config.rows, config.cols)
+                {
+                    return Err(
+                        "ConnectFour win_length must fit within at least one board dimension"
+                            .into(),
+                    );
+                }
+            }
+            Game::RockPaperScissors(_) => {}
+        }
+        Ok(())
+    }
+
     fn error_result(&self, error: String) -> TestResult {
         let mut stats = GameStats::new();
         stats.outcome = GameOutcome::Error { message: error };
@@ -202,39 +228,33 @@ mod tests {
 
     #[test]
     fn test_game_from_string() {
-        assert!(matches!(Game::from("TicTacToe"), Game::TicTacToe(_)));
         assert!(matches!(
-            Game::from("RockPaperScissors"),
-            Game::RockPaperScissors(_)
+            Game::try_from("TicTacToe"),
+            Ok(Game::TicTacToe(_))
         ));
-        assert!(matches!(Game::from("ConnectFour"), Game::ConnectFour(_)));
+        assert!(matches!(
+            Game::try_from("RockPaperScissors"),
+            Ok(Game::RockPaperScissors(_))
+        ));
+        assert!(matches!(
+            Game::try_from("ConnectFour"),
+            Ok(Game::ConnectFour(_))
+        ));
     }
 
     #[test]
-    #[should_panic(expected = "Unknown game name")]
     fn test_game_from_invalid_string() {
-        let _ = Game::from("InvalidGame");
-    }
-
-    #[test]
-    fn test_game_new() {
-        assert!(matches!(Game::new("TicTacToe"), Some(Game::TicTacToe(_))));
-        assert!(matches!(
-            Game::new("RockPaperScissors"),
-            Some(Game::RockPaperScissors(_))
-        ));
-        assert!(matches!(
-            Game::new("ConnectFour"),
-            Some(Game::ConnectFour(_))
-        ));
-        assert!(Game::new("InvalidGame").is_none());
+        assert!(Game::try_from("InvalidGame").is_err());
     }
 
     #[test]
     fn test_game_name() {
-        assert_eq!(Game::from("TicTacToe").name(), "TicTacToe");
-        assert_eq!(Game::from("RockPaperScissors").name(), "RockPaperScissors");
-        assert_eq!(Game::from("ConnectFour").name(), "ConnectFour");
+        assert_eq!(Game::try_from("TicTacToe").unwrap().name(), "TicTacToe");
+        assert_eq!(
+            Game::try_from("RockPaperScissors").unwrap().name(),
+            "RockPaperScissors"
+        );
+        assert_eq!(Game::try_from("ConnectFour").unwrap().name(), "ConnectFour");
     }
 
     #[test]
@@ -262,5 +282,36 @@ mod tests {
     fn test_player_order_default() {
         let order = PlayerOrder::default();
         assert!(matches!(order, PlayerOrder::OrderInList));
+    }
+
+    #[test]
+    fn rejects_invalid_game_dimensions() {
+        assert!(
+            Game::TicTacToe(TicTacToeConfig {
+                board_size: 0,
+                win_length: 0,
+                order: PlayerOrder::default(),
+            })
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Game::ConnectFour(ConnectFourConfig {
+                rows: 6,
+                cols: 7,
+                win_length: 8,
+                order: PlayerOrder::default(),
+            })
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Game::RockPaperScissors(RockPaperScissorsConfig {
+                rounds: 0,
+                order: PlayerOrder::default(),
+            })
+            .validate()
+            .is_err()
+        );
     }
 }

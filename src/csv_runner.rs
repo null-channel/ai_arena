@@ -1,6 +1,7 @@
 use csv::ReaderBuilder;
 use std::fs::File;
 use std::path::Path;
+use std::str::FromStr;
 
 use crate::agent_config::{AIAgentConfig, AgentKind};
 use crate::games::{Game, TestResult, print_game_stats};
@@ -24,16 +25,8 @@ pub struct CsvTestCase {
 
 impl CsvTestCase {
     fn from_record(record: csv::StringRecord, headers: &csv::StringRecord) -> Result<Self, String> {
-        let get_field = |name: &str| -> Result<String, String> {
-            let idx = headers
-                .iter()
-                .position(|h| h.eq_ignore_ascii_case(name))
-                .ok_or_else(|| format!("Missing required field: {}", name))?;
-            Ok(record.get(idx).unwrap_or("").to_string())
-        };
-
         let parse_agent_kind = |name: &str| -> Result<AgentKind, String> {
-            let value = get_field(name)?;
+            let value = required_field(&record, headers, name)?;
             match value.to_uppercase().as_str() {
                 "OPENAI" => Ok(AgentKind::OpenAI),
                 "ANTHROPIC" => Ok(AgentKind::Anthropic),
@@ -45,51 +38,37 @@ impl CsvTestCase {
             }
         };
 
-        let parse_u32 = |name: &str| -> Result<u32, String> {
-            get_field(name)?
-                .parse()
-                .map_err(|e| format!("Invalid {}: {}", name, e))
-        };
-
-        let parse_f32 = |name: &str| -> Result<f32, String> {
-            get_field(name)?
-                .parse()
-                .map_err(|e| format!("Invalid {}: {}", name, e))
-        };
-
-        let parse_u64 = |name: &str| -> Result<u64, String> {
-            get_field(name)?
-                .parse()
-                .map_err(|e| format!("Invalid {}: {}", name, e))
-        };
-
-        // Helper to get optional field
-        let get_optional_field = |name: &str| -> Option<String> {
-            headers
-                .iter()
-                .position(|h| h.eq_ignore_ascii_case(name))
-                .and_then(|idx| {
-                    record
-                        .get(idx)
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string())
-                })
-        };
+        let game_name = required_field(&record, headers, "game_name")?;
+        Game::try_from(game_name.as_str())?;
+        let agent_one_temp: f32 = parse_optional(&record, headers, "agent_one_temp", 0.7)?;
+        let agent_two_temp: f32 = parse_optional(&record, headers, "agent_two_temp", 0.7)?;
+        for (field, temperature) in [
+            ("agent_one_temp", agent_one_temp),
+            ("agent_two_temp", agent_two_temp),
+        ] {
+            if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+                return Err(format!("Invalid {field}: must be between 0.0 and 2.0"));
+            }
+        }
+        let repetitions = parse_optional(&record, headers, "repetitions", 1)?;
+        if repetitions == 0 {
+            return Err("Invalid repetitions: must be greater than zero".into());
+        }
 
         Ok(CsvTestCase {
-            game_name: get_field("game_name")?,
+            game_name,
             agent_one_kind: parse_agent_kind("agent_one_kind")?,
-            agent_one_model: get_field("agent_one_model")?,
-            agent_one_temp: parse_f32("agent_one_temp").unwrap_or(0.7),
-            agent_one_seed: parse_u64("agent_one_seed").unwrap_or(0),
-            agent_one_secret_profile: get_optional_field("agent_one_secret_profile"),
+            agent_one_model: required_field(&record, headers, "agent_one_model")?,
+            agent_one_temp,
+            agent_one_seed: parse_optional(&record, headers, "agent_one_seed", 0)?,
+            agent_one_secret_profile: optional_field(&record, headers, "agent_one_secret_profile"),
             agent_two_kind: parse_agent_kind("agent_two_kind")?,
-            agent_two_model: get_field("agent_two_model")?,
-            agent_two_temp: parse_f32("agent_two_temp").unwrap_or(0.7),
-            agent_two_seed: parse_u64("agent_two_seed").unwrap_or(0),
-            agent_two_secret_profile: get_optional_field("agent_two_secret_profile"),
-            repetitions: parse_u32("repetitions").unwrap_or(1),
-            description: get_field("description").unwrap_or_else(|_| "".to_string()),
+            agent_two_model: required_field(&record, headers, "agent_two_model")?,
+            agent_two_temp,
+            agent_two_seed: parse_optional(&record, headers, "agent_two_seed", 0)?,
+            agent_two_secret_profile: optional_field(&record, headers, "agent_two_secret_profile"),
+            repetitions,
+            description: optional_field(&record, headers, "description").unwrap_or_default(),
         })
     }
 
@@ -111,6 +90,46 @@ impl CsvTestCase {
             },
         ]
     }
+}
+
+fn optional_field(
+    record: &csv::StringRecord,
+    headers: &csv::StringRecord,
+    name: &str,
+) -> Option<String> {
+    headers
+        .iter()
+        .position(|header| header.eq_ignore_ascii_case(name))
+        .and_then(|index| record.get(index))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn required_field(
+    record: &csv::StringRecord,
+    headers: &csv::StringRecord,
+    name: &str,
+) -> Result<String, String> {
+    optional_field(record, headers, name)
+        .ok_or_else(|| format!("Missing or empty required field: {name}"))
+}
+
+fn parse_optional<T>(
+    record: &csv::StringRecord,
+    headers: &csv::StringRecord,
+    name: &str,
+    default: T,
+) -> Result<T, String>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    optional_field(record, headers, name).map_or(Ok(default), |value| {
+        value
+            .parse()
+            .map_err(|error| format!("Invalid {name}: {error}"))
+    })
 }
 
 pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String> {
@@ -164,7 +183,7 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
             test_case.agent_two_kind
         );
 
-        let game = Game::from(test_case.game_name.as_str());
+        let game = Game::try_from(test_case.game_name.as_str())?;
         let agents = test_case.to_agent_configs();
 
         for rep in 0..test_case.repetitions {
@@ -366,7 +385,34 @@ mod tests {
 
         let result = CsvTestCase::from_record(record, &headers);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing required field"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Missing or empty required field")
+        );
+    }
+
+    #[test]
+    fn rejects_present_but_malformed_optional_values() {
+        let headers = create_test_headers();
+        let record = csv::StringRecord::from(vec![
+            "TicTacToe",
+            "OpenAI",
+            "model",
+            "not-a-number",
+            "",
+            "",
+            "Ollama",
+            "model",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]);
+
+        let error = CsvTestCase::from_record(record, &headers).unwrap_err();
+        assert!(error.contains("Invalid agent_one_temp"));
     }
 
     #[test]
