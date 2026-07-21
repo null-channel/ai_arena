@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(stats.total_duration_ms, 0);
         assert_eq!(stats.invalid_moves, 0);
         assert_eq!(stats.winner, None);
-        assert_eq!(stats.draw, false);
+        assert!(!stats.draw);
     }
 
     #[test]
@@ -113,7 +113,7 @@ mod tests {
             state_after: json!({}),
             diagnostics: None,
         };
-        
+
         stats.add_turn(turn);
         assert_eq!(stats.turns.len(), 1);
         assert_eq!(stats.invalid_moves, 0);
@@ -133,7 +133,7 @@ mod tests {
             state_after: json!({}),
             diagnostics: None,
         };
-        
+
         stats.add_turn(turn);
         assert_eq!(stats.turns.len(), 1);
         assert_eq!(stats.invalid_moves, 1);
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn test_add_multiple_turns() {
         let mut stats = GameStats::new();
-        
+
         for i in 0..5 {
             let turn = TurnStats {
                 turn_number: i,
@@ -150,14 +150,18 @@ mod tests {
                 move_made: json!({"move": i}),
                 time_taken_ms: ((i + 1) * 10) as u64,
                 move_valid: i % 2 == 0, // Alternate valid/invalid
-                error_message: if i % 2 == 0 { None } else { Some("Invalid".to_string()) },
+                error_message: if i % 2 == 0 {
+                    None
+                } else {
+                    Some("Invalid".to_string())
+                },
                 state_before: json!({}),
                 state_after: json!({}),
                 diagnostics: None,
             };
             stats.add_turn(turn);
         }
-        
+
         assert_eq!(stats.turns.len(), 5);
         assert_eq!(stats.invalid_moves, 2); // Turns 1 and 3 are invalid
     }
@@ -211,7 +215,7 @@ mod tests {
     fn test_total_turns() {
         let mut stats = GameStats::new();
         assert_eq!(stats.total_turns(), 0);
-        
+
         for i in 0..3 {
             let turn = TurnStats {
                 turn_number: i,
@@ -226,8 +230,7 @@ mod tests {
             };
             stats.add_turn(turn);
         }
-        
+
         assert_eq!(stats.total_turns(), 3);
     }
 }
-

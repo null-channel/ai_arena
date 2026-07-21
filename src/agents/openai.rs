@@ -1,6 +1,6 @@
 use async_openai::{
-    config::OpenAIConfig,
     Client,
+    config::OpenAIConfig,
     types::{
         ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
         ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs, ResponseFormat,
@@ -21,12 +21,16 @@ impl OpenAIAgent {
         &self.name
     }
 
-    pub fn new(name: impl Into<String>, model: impl Into<String>, api_key: impl Into<String>) -> Result<Self, AgentError> {
+    pub fn new(
+        name: impl Into<String>,
+        model: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Result<Self, AgentError> {
         let api_key = api_key.into();
         // Create config with the API key directly - no environment variable manipulation needed
         let config = OpenAIConfig::new().with_api_key(&api_key);
         let client = Client::with_config(config);
-        
+
         Ok(Self {
             name: name.into(),
             model: model.into(),
@@ -66,7 +70,8 @@ impl OpenAIAgent {
 
         // Use the client that was created with the API key during initialization
         // No environment variable manipulation needed - eliminates race conditions
-        let resp = self.client
+        let resp = self
+            .client
             .chat()
             .create(req)
             .await
@@ -74,7 +79,7 @@ impl OpenAIAgent {
 
         let content = resp
             .choices
-            .get(0)
+            .first()
             .and_then(|c| c.message.content.as_deref())
             .ok_or_else(|| AgentError::InvalidResponse("missing content".into()))?;
 

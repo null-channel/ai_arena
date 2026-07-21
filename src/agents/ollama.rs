@@ -9,7 +9,6 @@ use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
 pub struct OllamaAgent {
     name: String,
     model: String,
-    base_url: String,
     temperature: f32,
     client: LlmClient,
 }
@@ -32,7 +31,6 @@ impl OllamaAgent {
         Ok(Self {
             name: name.into(),
             model: model.into(),
-            base_url,
             temperature,
             client,
         })

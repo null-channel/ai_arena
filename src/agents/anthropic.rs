@@ -1,12 +1,10 @@
-use rig::{
-    agent::Agent,
-    providers::anthropic::completion::CompletionModel,
-};
+use rig::{agent::Agent, providers::anthropic::completion::CompletionModel};
 
 use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
 
 pub struct AnthropicAgent {
     name: String,
+    #[allow(dead_code)]
     agent: Agent<CompletionModel>,
 }
 
