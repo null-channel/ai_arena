@@ -41,7 +41,7 @@ pub enum AgentError {
     Timeout {
         timeout_ms: u64,
     },
-    BudgetExceeded(String),
+    BudgetExceeded(String, Option<TokenUsage>),
 }
 
 impl std::fmt::Display for AgentError {
@@ -53,12 +53,24 @@ impl std::fmt::Display for AgentError {
             AgentError::Timeout { timeout_ms } => {
                 write!(f, "request timed out after {timeout_ms} ms")
             }
-            AgentError::BudgetExceeded(msg) => write!(f, "budget exceeded: {msg}"),
+            AgentError::BudgetExceeded(msg, _) => write!(f, "budget exceeded: {msg}"),
         }
     }
 }
 
 impl std::error::Error for AgentError {}
+
+impl AgentError {
+    pub fn token_usage(&self) -> Option<TokenUsage> {
+        match self {
+            Self::BudgetExceeded(_, usage) => *usage,
+            Self::InvalidRequest(_)
+            | Self::InvalidResponse(_)
+            | Self::Internal(_)
+            | Self::Timeout { .. } => None,
+        }
+    }
+}
 
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
@@ -78,6 +90,15 @@ mod tests {
 
         let timeout = AgentError::Timeout { timeout_ms: 500 };
         assert_eq!(timeout.to_string(), "request timed out after 500 ms");
+
+        let usage = TokenUsage {
+            input_tokens: 4,
+            output_tokens: 2,
+            total_tokens: 6,
+        };
+        let budget = AgentError::BudgetExceeded("token limit".into(), Some(usage));
+        assert_eq!(budget.token_usage(), Some(usage));
+        assert_eq!(budget.to_string(), "budget exceeded: token limit");
     }
 
     #[test]
@@ -159,6 +180,7 @@ impl<A> ManagedAgent<A> {
         let Some(usage) = response.token_usage else {
             return Err(AgentError::BudgetExceeded(
                 "provider did not report token usage".into(),
+                None,
             ));
         };
 
@@ -175,10 +197,13 @@ impl<A> ManagedAgent<A> {
                 .is_ok()
             {
                 return if exceeded {
-                    Err(AgentError::BudgetExceeded(format!(
-                        "token limit {limit} would be exceeded (already consumed {consumed}, response used {})",
-                        usage.total_tokens
-                    )))
+                    Err(AgentError::BudgetExceeded(
+                        format!(
+                            "token limit {limit} would be exceeded (already consumed {consumed}, response used {})",
+                            usage.total_tokens
+                        ),
+                        Some(usage),
+                    ))
                 } else {
                     Ok(())
                 };
@@ -318,11 +343,11 @@ mod managed_tests {
         assert!(agent.execute_turn(&request()).await.is_ok());
         assert!(matches!(
             agent.execute_turn(&request()).await,
-            Err(AgentError::BudgetExceeded(_))
+            Err(AgentError::BudgetExceeded(_, Some(_)))
         ));
         assert!(matches!(
             agent.execute_turn(&request()).await,
-            Err(AgentError::BudgetExceeded(_))
+            Err(AgentError::BudgetExceeded(_, None))
         ));
         assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
@@ -392,9 +417,10 @@ impl<A: GameAgent> GameAgent for ManagedAgent<A> {
         if let Some(limit) = self.max_total_tokens
             && self.consumed_tokens.load(Ordering::Relaxed) >= limit
         {
-            return Err(AgentError::BudgetExceeded(format!(
-                "token limit {limit} has been reached"
-            )));
+            return Err(AgentError::BudgetExceeded(
+                format!("token limit {limit} has been reached"),
+                None,
+            ));
         }
 
         let _permit = self

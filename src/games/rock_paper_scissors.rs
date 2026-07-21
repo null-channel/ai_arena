@@ -346,13 +346,16 @@ impl RockPaperScissors {
                     ),
                 }
             }
-            Err(error) => (
-                Value::Null,
-                None,
-                None,
-                None,
-                Some(format!("{player_name}: agent error: {error}")),
-            ),
+            Err(error) => {
+                let token_usage = error.token_usage();
+                (
+                    Value::Null,
+                    None,
+                    token_usage,
+                    None,
+                    Some(format!("{player_name}: agent error: {error}")),
+                )
+            }
         }
     }
 

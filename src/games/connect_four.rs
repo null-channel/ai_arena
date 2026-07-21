@@ -200,6 +200,7 @@ impl ConnectFour {
         let move_response: MoveResponse = match agent.execute_turn(&move_request).await {
             Ok(response) => response,
             Err(error) => {
+                let token_usage = error.token_usage();
                 let error = format!("Agent error: {error}");
                 self.stats.add_turn(TurnStats {
                     turn_number,
@@ -211,7 +212,7 @@ impl ConnectFour {
                     state_before: state_before.clone(),
                     state_after: state_before,
                     diagnostics: None,
-                    token_usage: None,
+                    token_usage,
                 });
                 return Err(error);
             }
