@@ -13,6 +13,8 @@ use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
 pub struct OpenAIAgent {
     name: String,
     model: String,
+    temperature: f32,
+    seed: Option<i64>,
     client: Client<OpenAIConfig>,
 }
 
@@ -25,7 +27,13 @@ impl OpenAIAgent {
         name: impl Into<String>,
         model: impl Into<String>,
         api_key: impl Into<String>,
+        temperature: f32,
+        seed: Option<u64>,
     ) -> Result<Self, AgentError> {
+        let seed = seed
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| AgentError::InvalidRequest("OpenAI seed exceeds i64::MAX".into()))?;
         let api_key = api_key.into();
         // Create config with the API key directly - no environment variable manipulation needed
         let config = OpenAIConfig::new().with_api_key(&api_key);
@@ -34,6 +42,8 @@ impl OpenAIAgent {
         Ok(Self {
             name: name.into(),
             model: model.into(),
+            temperature,
+            seed,
             client,
         })
     }
@@ -61,10 +71,16 @@ impl OpenAIAgent {
                 .into(),
         ];
 
-        let req = CreateChatCompletionRequestArgs::default()
+        let mut request_builder = CreateChatCompletionRequestArgs::default();
+        request_builder
             .model(&self.model)
             .messages(messages)
-            .response_format(ResponseFormat::JsonObject)
+            .temperature(self.temperature)
+            .response_format(ResponseFormat::JsonObject);
+        if let Some(seed) = self.seed {
+            request_builder.seed(seed);
+        }
+        let req = request_builder
             .build()
             .map_err(|e| AgentError::Internal(format!("build chat req: {}", e)))?;
 
@@ -90,5 +106,23 @@ impl OpenAIAgent {
             chosen_move,
             diagnostics: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_sampling_configuration() {
+        let agent = OpenAIAgent::new("test", "model", "key", 0.4, Some(42)).unwrap();
+        assert_eq!(agent.temperature, 0.4);
+        assert_eq!(agent.seed, Some(42));
+    }
+
+    #[test]
+    fn rejects_seed_larger_than_openai_supports() {
+        let result = OpenAIAgent::new("test", "model", "key", 0.4, Some(u64::MAX));
+        assert!(result.is_err());
     }
 }

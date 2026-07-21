@@ -144,9 +144,13 @@ impl Game {
     }
 
     pub async fn play_game(&self, agents: Vec<AIAgentConfig>) -> TestResult {
+        let agents = match build_agents(agents) {
+            Ok(agents) => agents,
+            Err(error) => return self.error_result(error.to_string()),
+        };
+
         match self {
             Game::TicTacToe(config) => {
-                let agents = build_agents(agents);
                 let game_config = GameTicTacToeConfig {
                     board_size: config.board_size,
                     win_length: config.win_length,
@@ -161,7 +165,6 @@ impl Game {
                 })
             }
             Game::RockPaperScissors(config) => {
-                let agents = build_agents(agents);
                 let game_config = GameRockPaperScissorsConfig {
                     rounds: config.rounds,
                 };
@@ -175,7 +178,6 @@ impl Game {
                 })
             }
             Game::ConnectFour(config) => {
-                let agents = build_agents(agents);
                 let game_config = GameConnectFourConfig {
                     rows: config.rows,
                     cols: config.cols,
@@ -190,6 +192,26 @@ impl Game {
                     error: result.error,
                 })
             }
+        }
+    }
+
+    fn error_result(&self, error: String) -> TestResult {
+        match self {
+            Game::TicTacToe(_) => TestResult::TicTacToe(TicTacToeResult {
+                winner: None,
+                stats: GameStats::new(),
+                error: Some(error),
+            }),
+            Game::RockPaperScissors(_) => TestResult::RockPaperScissors(RockPaperScissorsResult {
+                winner: None,
+                stats: GameStats::new(),
+                error: Some(error),
+            }),
+            Game::ConnectFour(_) => TestResult::ConnectFour(ConnectFourResult {
+                winner: None,
+                stats: GameStats::new(),
+                error: Some(error),
+            }),
         }
     }
 }

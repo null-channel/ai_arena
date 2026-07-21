@@ -10,6 +10,7 @@ pub struct OllamaAgent {
     name: String,
     model: String,
     temperature: f32,
+    seed: Option<u64>,
     client: LlmClient,
 }
 
@@ -23,6 +24,7 @@ impl OllamaAgent {
         model: impl Into<String>,
         base_url: impl Into<String>,
         temperature: f32,
+        seed: Option<u64>,
     ) -> Result<Self, AgentError> {
         let base_url = base_url.into();
         let client = LlmClient::ollama_with_base_url(&base_url)
@@ -32,6 +34,7 @@ impl OllamaAgent {
             name: name.into(),
             model: model.into(),
             temperature,
+            seed,
             client,
         })
     }
@@ -55,6 +58,7 @@ impl OllamaAgent {
             model: self.model.clone(),
             messages,
             temperature: Some(self.temperature),
+            seed: self.seed,
             ..Default::default()
         };
 
@@ -87,7 +91,13 @@ mod tests {
     fn test_ollama_agent_creation() {
         // Test that we can create an OllamaAgent with valid parameters
         // Note: This will fail if Ollama server is not running, but tests the API
-        let result = OllamaAgent::new("test_agent", "llama3", "http://localhost:11434", 0.7);
+        let result = OllamaAgent::new(
+            "test_agent",
+            "llama3",
+            "http://localhost:11434",
+            0.7,
+            Some(42),
+        );
 
         // If Ollama is running, this should succeed
         // If not, we at least verify the API is correct
@@ -109,7 +119,9 @@ mod tests {
     #[test]
     fn test_ollama_agent_name() {
         // Test name method (doesn't require Ollama to be running)
-        if let Ok(agent) = OllamaAgent::new("test_name", "llama3", "http://localhost:11434", 0.7) {
+        if let Ok(agent) =
+            OllamaAgent::new("test_name", "llama3", "http://localhost:11434", 0.7, None)
+        {
             assert_eq!(agent.name(), "test_name");
         }
     }
