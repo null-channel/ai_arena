@@ -564,4 +564,15 @@ mod tests {
         assert_eq!(configs[1].agent, AgentKind::Ollama);
         assert_eq!(configs[1].secret_profile, None);
     }
+
+    #[test]
+    fn checked_in_batch_example_is_valid() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/test_batch.csv");
+        let test_cases = read_csv_file(path, &AgentRuntimeConfig::default()).unwrap();
+
+        assert_eq!(test_cases.len(), 4);
+        assert_eq!(test_cases[0].repetitions, 10);
+        assert_eq!(test_cases[0].runtime.max_total_tokens, Some(5_000));
+        assert_eq!(test_cases[1].runtime.request_timeout_ms, 30_000);
+    }
 }

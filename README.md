@@ -1,154 +1,190 @@
-# ai_arena
-A place for AI's to test their metal against each other in 'the arena'
+# AI Arena
 
-## Concept
-An arena where different AI agents can compete against each other in various games or challenges. 
+AI Arena is a Rust harness for pitting language models against one another in small, structured games. It gives each model the same JSON game state and move schema, validates every response against the game rules, and records enough detail to compare behavior, speed, reliability, and token use.
 
-**Current Games:**
-- ✅ Tic-Tac-Toe
-- ✅ Rock-Paper-Scissors
-- ✅ Connect Four
+The project currently supports OpenAI, Anthropic, and Ollama agents playing Tic-Tac-Toe, Connect Four, and Rock-Paper-Scissors.
 
-**Planned Games:**
-- Chess
-- Checkers
+## What it provides
 
-## Features
-- Modular design to easily add new games and AI agents. The initial engine supports "turn based" games.
-- Support for many different AI Models including self-hosted and API-based models. Current support: OpenAI, Anthropic, Ollama.
-- Two ways to run games:
-  - **Command Line**: Run individual games with detailed statistics
-  - **CSV Batch**: Run multiple game configurations from a CSV file
-- Comprehensive turn-by-turn statistics tracking for analysis
-- Beautiful formatted output using tables
+- Manual matches and repeatable CSV batches.
+- Configurable model, temperature, seed, credentials profile, timeout, retry, concurrency, and token-budget settings.
+- Fairer repeated trials by reversing agent seats on every even-numbered match.
+- Explicit win, draw, forfeit, and infrastructure-error outcomes.
+- Human-readable summaries plus versioned JSON Lines output for downstream analysis.
+- A public Rust library, a thin CLI, deterministic game tests, and strict CI quality gates.
 
-## Usage
+## Quick start
 
-### Running a Single Game (Command Line)
-
-Run a single game with detailed statistics output:
+The repository pins Rust 1.97.1 in `rust-toolchain.toml`. Install [rustup](https://rustup.rs/) and a system C linker, then build:
 
 ```bash
-ai_arena \
+git clone https://github.com/null-channel/ai_arena.git
+cd ai_arena
+cargo build --release --locked
+```
+
+Configure the providers used by your match:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OLLAMA_BASE_URL="http://localhost:11434"
+```
+
+`OLLAMA_BASE_URL` is optional and defaults to `http://localhost:11434`. Model names always come from the CLI or CSV; there is no `OLLAMA_MODEL` environment setting.
+
+Run a match:
+
+```bash
+cargo run --release --locked -- \
   --game-name TicTacToe \
   --agent-one-kind OpenAI \
   --agent-one-model gpt-4o-mini \
-  --agent-one-temp 0.7 \
+  --agent-one-temp 0.2 \
   --agent-one-seed 42 \
   --agent-two-kind Ollama \
-  --agent-two-model llama3 \
-  --agent-two-temp 0.7 \
+  --agent-two-model llama3.2 \
+  --agent-two-temp 0.2 \
   --agent-two-seed 43 \
-  --repetitions 1
+  --repetitions 10 \
+  --output-jsonl results.jsonl
 ```
 
-### Running Batch Games (CSV File)
+Use `cargo run --release -- --help` to see every option. If the release binary has been installed or copied onto your `PATH`, replace `cargo run --release --locked --` with `ai_arena`.
 
-Run multiple game configurations from a CSV file:
+## Credentials and provider profiles
+
+Environment variables are enough for a single credential per provider. Named profiles make it possible to compare accounts or Ollama endpoints without putting secrets in a shareable CSV.
+
+Copy [`examples/secrets.toml.example`](examples/secrets.toml.example) to one of these locations:
+
+- `$XDG_CONFIG_HOME/ai_arena/secrets.toml` when `XDG_CONFIG_HOME` is set.
+- `~/.config/ai_arena/secrets.toml` otherwise.
+
+Protect the file before adding real keys:
 
 ```bash
-ai_arena --test-file examples/test_batch.csv
+chmod 600 ~/.config/ai_arena/secrets.toml
 ```
 
-### CSV File Format
+Then select profiles with `--agent-one-secret-profile` and `--agent-two-secret-profile`, or with the equivalent CSV columns. Resolution order is:
 
-The CSV file should have the following columns:
+1. The requested named profile.
+2. The provider environment variable.
+3. The provider's `default` profile.
+4. An actionable error, except Ollama, which falls back to its localhost URL.
 
-| Column | Required | Description | Example Values |
-|--------|----------|-------------|----------------|
-| `game_name` | ✅ Yes | Name of the game | `TicTacToe`, `RockPaperScissors`, `ConnectFour` |
-| `agent_one_kind` | ✅ Yes | Type of first agent | `OpenAI`, `Anthropic`, `Ollama` |
-| `agent_one_model` | ✅ Yes | Model name for first agent | `gpt-4o-mini`, `llama3`, `claude-3-7-sonnet` |
-| `agent_one_temp` | ❌ No | Temperature for first agent (default: 0.7) | `0.0` to `1.0` |
-| `agent_one_seed` | ❌ No | Random seed for first agent (default: 0) | Any integer |
-| `agent_two_kind` | ✅ Yes | Type of second agent | `OpenAI`, `Anthropic`, `Ollama` |
-| `agent_two_model` | ✅ Yes | Model name for second agent | `gpt-4o-mini`, `llama3`, `claude-3-7-sonnet` |
-| `agent_two_temp` | ❌ No | Temperature for second agent (default: 0.7) | `0.0` to `1.0` |
-| `agent_two_seed` | ❌ No | Random seed for second agent (default: 0) | Any integer |
-| `repetitions` | ❌ No | Number of times to run this game (default: 1) | Any positive integer |
-| `description` | ❌ No | Optional description for this test case | Any string |
+OpenAI uses `OPENAI_API_KEY`, Anthropic uses `ANTHROPIC_API_KEY`, and Ollama uses `OLLAMA_BASE_URL`.
 
-#### Example CSV File
+## Games and match behavior
 
-```csv
-game_name,agent_one_kind,agent_one_model,agent_one_temp,agent_one_seed,agent_two_kind,agent_two_model,agent_two_temp,agent_two_seed,repetitions,description
-TicTacToe,OpenAI,gpt-4o-mini,0.7,42,OpenAI,gpt-4o-mini,0.7,43,1,OpenAI vs OpenAI TicTacToe
-RockPaperScissors,Ollama,llama3,0.7,100,Ollama,llama3,0.8,101,3,Best of 3 Rock Paper Scissors
-ConnectFour,Anthropic,claude-3-7-sonnet,0.7,200,OpenAI,gpt-4o-mini,0.7,201,1,Connect Four Championship
-TicTacToe,Ollama,llama3,0.5,300,OpenAI,gpt-4o-mini,0.9,301,2,TicTacToe with different temperatures
-```
+| Game | Default configuration | Turn behavior |
+| --- | --- | --- |
+| `TicTacToe` | 3×3 board, three in a row | Agents alternate; an invalid move leaves the board and player unchanged. |
+| `ConnectFour` | 6×7 board, four in a row | Agents alternate; an invalid move leaves the board and player unchanged. |
+| `RockPaperScissors` | Three rounds | Both agents answer concurrently from the same round state. |
 
-**Visual Representation:**
+Tic-Tac-Toe and Connect Four forfeit an agent after three consecutive failed attempts on its turn. Rock-Paper-Scissors treats an invalid choice as a forfeit because both choices are submitted simultaneously. Provider failures and malformed JSON are recorded in turn statistics instead of disappearing from the result.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ CSV Batch File Structure                                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Row 1: Headers (column names)                                             │
-│  Row 2+: Test cases (one per row)                                         │
-│                                                                             │
-│  Each row defines:                                                         │
-│  • Which game to play                                                      │
-│  • Two AI agents to compete                                                │
-│  • Their configurations (model, temperature, seed)                        │
-│  • How many times to repeat                                                │
-│  • Optional description                                                    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+For repeated matches, the original agent order is used for odd repetitions and reversed for even repetitions. Outcome summaries use a stable identity derived from provider, model, temperature, and seed, so wins stay attributed to the same configuration after seats change.
 
-### Output Format
+The built-in CLI uses the default game dimensions shown above. Library callers can construct custom game configurations and receive a structured error outcome when dimensions are invalid.
 
-When running games, you'll see formatted statistics including:
+## Batch runs
 
-1. **Game Summary**
-   - Winner or draw status
-   - Total duration
-   - Number of turns
-   - Average turn time
-   - Invalid moves count
-
-2. **Turn-by-Turn Table**
-   - Each move with player, move details, timing, and validity
-
-3. **Player Statistics**
-   - Aggregated stats per player (turns, valid/invalid moves, timing)
-
-Example output:
-```
-================================================================================
-GAME RESULTS: TicTacToe
-================================================================================
-
-📊 GAME SUMMARY
---------------------------------------------------------------------------------
-🏆 Winner: OpenAI_1 (X)
-⏱️  Total Duration: 2.34s
-🔄 Total Turns: 9
-⚡ Average Turn Time: 260.00ms
-❌ Invalid Moves: 0
-
-📋 TURN-BY-TURN STATISTICS
---------------------------------------------------------------------------------
-┌──────┬─────────────┬──────────────┬───────────┬───────┬───────┐
-│ Turn │ Player      │ Move         │ Time (ms) │ Valid │ Error │
-├──────┼─────────────┼──────────────┼───────────┼───────┼───────┤
-│ 1    │ OpenAI_1    │ row: 1, col: │ 245       │ ✓     │ -     │
-│      │             │ 1            │           │       │       │
-...
-```
-
-## Environment Variables
-
-Make sure to set the required API keys:
+Run the checked-in example:
 
 ```bash
-export OPENAI_API_KEY="your-openai-key"
-export ANTHROPIC_API_KEY="your-anthropic-key"
-export OLLAMA_BASE_URL="http://localhost:11434"  # Optional, defaults to localhost
-export OLLAMA_MODEL="llama3"  # Optional, defaults to llama3
+cargo run --release --locked -- \
+  --test-file examples/test_batch.csv \
+  --output-jsonl batch-results.jsonl
 ```
 
-## Open Questions
-- Do we want to have a "allow cheating" mode where AI's are given the ability to cheat? What would this look like? would it be optional and up to the AI if they cheat or not? would it give them the ability to make moves that are not allowed by the rules? could the other AI call out the cheating AI?
+CSV header names are case-insensitive. Optional columns may be omitted entirely or left blank. A present malformed value fails the row with its line number rather than silently falling back to a default.
+
+| Column | Required | Default or constraint |
+| --- | --- | --- |
+| `game_name` | Yes | `TicTacToe`, `RockPaperScissors`, or `ConnectFour` |
+| `agent_one_kind`, `agent_two_kind` | Yes | `OpenAI`, `Anthropic`, or `Ollama` |
+| `agent_one_model`, `agent_two_model` | Yes | Non-empty provider model identifier |
+| `agent_one_temp`, `agent_two_temp` | No | `0.7`; finite value from `0.0` through `2.0` |
+| `agent_one_seed`, `agent_two_seed` | No | `0`; unsigned integer |
+| `agent_one_secret_profile`, `agent_two_secret_profile` | No | Environment/default-profile resolution |
+| `repetitions` | No | `1`; must be greater than zero |
+| `description` | No | Empty text |
+| `request_timeout_ms` | No | CLI value, normally `60000`; must be positive |
+| `max_retries` | No | CLI value, normally `2` |
+| `retry_backoff_ms` | No | CLI value, normally `250` |
+| `max_total_tokens` | No | Unlimited; positive provider-reported token total |
+| `max_concurrent_requests` | No | CLI value, normally `2`; must be positive |
+
+See [`examples/test_batch.csv`](examples/test_batch.csv) for complete rows.
+
+## Runtime safeguards
+
+Provider calls use these match-level controls:
+
+| CLI option | Default | Behavior |
+| --- | ---: | --- |
+| `--request-timeout-ms` | `60000` | Bounds each provider attempt, including response parsing. |
+| `--max-retries` | `2` | Retries transient internal/provider errors and timeouts. |
+| `--retry-backoff-ms` | `250` | Initial retry delay; each subsequent delay doubles. |
+| `--max-concurrent-requests` | `2` | Caps requests in flight across both agents in a match. |
+| `--max-total-tokens` | unlimited | Stops an agent after its cumulative reported usage reaches the limit. |
+
+Invalid requests and invalid model responses are not retried. A timed-out provider might still finish and bill work remotely, so retries can duplicate cost even though the local future was cancelled.
+
+Token budgets rely on provider-reported usage. OpenAI and Ollama expose usage when their APIs return it; a configured budget fails closed if usage is absent. Anthropic token budgets are rejected because the current connector does not expose usage.
+
+## Results
+
+Terminal output includes the authoritative outcome, total and average latency, invalid-move count, provider-reported token totals, every attempted move, and an aggregate outcome percentage for repeated or batch runs.
+
+`--output-jsonl PATH` creates or truncates `PATH` and flushes one JSON object after every completed match. Each version 1 record includes:
+
+- Schema, prompt-protocol, and arena versions.
+- A UUID match ID and Unix-millisecond recording timestamp.
+- Game name and repetition position.
+- Agent seat, provider, model, temperature, requested/effective seed, and runtime policy.
+- The explicit outcome and complete per-turn statistics, including state snapshots, validation errors, diagnostics, latency, and token usage.
+
+Anthropic's effective seed is `null`; the current Anthropic API integration does not apply the requested seed. Keep `schema_version` and `prompt_protocol_version` when building analysis pipelines so future format or prompt changes can be compared intentionally.
+
+## Provider capability matrix
+
+| Capability | OpenAI | Anthropic | Ollama |
+| --- | --- | --- | --- |
+| Configured model | Yes | Yes | Yes |
+| Temperature | Yes | Yes | Yes |
+| Seed | Yes | No | Yes |
+| Token usage | When reported | No | When reported |
+| Named credential/endpoint profile | Yes | Yes | Yes |
+
+Individual models can impose narrower temperature, seed, JSON-mode, or context constraints than the arena validates locally. Provider-side errors are preserved in the match outcome.
+
+## Development
+
+Run the same checks as CI:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
+```
+
+The `ai_arena` library exposes agent contracts, provider configuration, games, batch parsing, reporting, and secrets resolution. Implement `GameAgent` to test games with another provider or a deterministic local double. Game engines are generic over that trait, so rule tests do not require live model APIs.
+
+CI runs formatting, strict Clippy, and all tests for every pull request. The toolchain file keeps local and CI compiler behavior aligned.
+
+## Known limitations
+
+- Unit tests cover game rules and provider request configuration, but the repository does not run paid-provider integration tests in CI.
+- Seat reversal reduces first-player bias; it does not make nondeterministic model outputs reproducible.
+- Token limits are reactive because usage is known only after a response.
+- Prompt protocol version 1 requests strict JSON through provider prompts/JSON mode rather than a shared tool-calling abstraction.
+- Secrets are stored as plaintext TOML and should be protected with filesystem permissions.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
