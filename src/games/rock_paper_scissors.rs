@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Instant;
 
-use crate::agent::{AIAgent, MoveRequest, MoveResponse};
+use crate::agent::{GameAgent, MoveRequest, MoveResponse};
 use crate::games::stats::{GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ impl RockPaperScissors {
         }
     }
 
-    pub async fn play_game(mut self, agents: Vec<AIAgent>) -> RockPaperScissorsResult {
+    pub async fn play_game<A: GameAgent>(mut self, agents: Vec<A>) -> RockPaperScissorsResult {
         let start_time = Instant::now();
 
         // Ensure we have exactly 2 agents
@@ -163,8 +163,8 @@ impl RockPaperScissors {
 
     async fn execute_round(
         &mut self,
-        player_one_agent: &AIAgent,
-        player_two_agent: &AIAgent,
+        player_one_agent: &impl GameAgent,
+        player_two_agent: &impl GameAgent,
     ) -> Result<RoundResult, String> {
         let round_start = Instant::now();
 

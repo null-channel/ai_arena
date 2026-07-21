@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Instant;
 
-use crate::agent::{AIAgent, MoveRequest, MoveResponse};
+use crate::agent::{GameAgent, MoveRequest, MoveResponse};
 use crate::games::stats::{GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -80,7 +80,7 @@ impl ConnectFour {
         }
     }
 
-    pub async fn play_game(mut self, agents: Vec<AIAgent>) -> ConnectFourResult {
+    pub async fn play_game<A: GameAgent>(mut self, agents: Vec<A>) -> ConnectFourResult {
         let start_time = Instant::now();
 
         // Ensure we have exactly 2 agents
@@ -96,7 +96,7 @@ impl ConnectFour {
         let player_yellow_agent = &agents[1];
 
         // Map players to agents
-        let agent_map: Vec<(&AIAgent, Player)> = vec![
+        let agent_map: Vec<(&A, Player)> = vec![
             (player_red_agent, Player::Red),
             (player_yellow_agent, Player::Yellow),
         ];
@@ -109,10 +109,10 @@ impl ConnectFour {
                 Player::Yellow => 1,
             };
 
-            let (agent, player) = &agent_map[current_agent_idx];
+            let &(agent, player) = &agent_map[current_agent_idx];
 
             // Execute turn
-            match self.execute_turn(agent, *player).await {
+            match self.execute_turn(agent, player).await {
                 Ok(()) => {
                     // Check for win condition
                     if self.check_win() {
@@ -153,7 +153,11 @@ impl ConnectFour {
         }
     }
 
-    async fn execute_turn(&mut self, agent: &AIAgent, player: Player) -> Result<(), String> {
+    async fn execute_turn<A: GameAgent>(
+        &mut self,
+        agent: &A,
+        player: Player,
+    ) -> Result<(), String> {
         let turn_start = Instant::now();
         self.state.turn_number += 1;
 
