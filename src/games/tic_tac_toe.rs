@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::time::Instant;
 
 use crate::agent::{GameAgent, MoveRequest, MoveResponse};
-use crate::games::stats::{GameStats, TurnStats};
+use crate::games::stats::{GameOutcome, GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TicTacToeConfig {
@@ -59,6 +59,8 @@ pub struct TicTacToe {
 }
 
 impl TicTacToe {
+    const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
     pub fn new(config: TicTacToeConfig) -> Self {
         let board_size = config.board_size as usize;
         let board = vec![vec![None; board_size]; board_size];
@@ -83,9 +85,12 @@ impl TicTacToe {
         // Ensure we have exactly 2 agents
         if agents.len() != 2 {
             return TicTacToeResult {
-                winner: None,
-                stats: self.stats,
-                error: Some(format!("Expected 2 agents, got {}", agents.len())),
+                stats: GameStats {
+                    outcome: GameOutcome::Error {
+                        message: format!("Expected 2 agents, got {}", agents.len()),
+                    },
+                    ..self.stats
+                },
             };
         }
 
@@ -95,6 +100,7 @@ impl TicTacToe {
         // Map players to agents
         let agent_map: Vec<(&A, Player)> =
             vec![(player_x_agent, Player::X), (player_o_agent, Player::O)];
+        let mut consecutive_failures = 0;
 
         while !self.state.game_over
             && self.state.turn_number < (self.config.board_size * self.config.board_size)
@@ -109,22 +115,25 @@ impl TicTacToe {
             // Execute turn
             match self.execute_turn(agent, player).await {
                 Ok(()) => {
+                    consecutive_failures = 0;
                     // Check for win condition
                     if self.check_win() {
                         self.state.game_over = true;
                         self.state.winner = Some(self.state.current_player);
-                        self.stats.winner = Some(format!(
-                            "{} ({})",
-                            agent.name(),
-                            self.state.current_player.as_str()
-                        ));
+                        self.stats.outcome = GameOutcome::Winner {
+                            winner: format!(
+                                "{} ({})",
+                                agent.name(),
+                                self.state.current_player.as_str()
+                            ),
+                        };
                         break;
                     }
 
                     // Check for draw
                     if self.state.turn_number >= (self.config.board_size * self.config.board_size) {
                         self.state.game_over = true;
-                        self.stats.draw = true;
+                        self.stats.outcome = GameOutcome::Draw;
                         break;
                     }
 
@@ -132,8 +141,16 @@ impl TicTacToe {
                     self.state.current_player = self.state.current_player.other();
                 }
                 Err(e) => {
-                    // Invalid move - game continues but stats are tracked
-                    eprintln!("Turn error: {}", e);
+                    consecutive_failures += 1;
+                    if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES {
+                        let winner = agent_map[1 - current_agent_idx].0.name().to_owned();
+                        self.stats.outcome = GameOutcome::Forfeit {
+                            winner,
+                            loser: agent.name().to_owned(),
+                            reason: e,
+                        };
+                        self.state.game_over = true;
+                    }
                 }
             }
         }
@@ -141,11 +158,7 @@ impl TicTacToe {
         let total_duration = start_time.elapsed();
         self.stats.total_duration_ms = total_duration.as_millis() as u64;
 
-        TicTacToeResult {
-            winner: self.stats.winner.clone(),
-            stats: self.stats,
-            error: None,
-        }
+        TicTacToeResult { stats: self.stats }
     }
 
     async fn execute_turn<A: GameAgent>(
@@ -154,7 +167,7 @@ impl TicTacToe {
         player: Player,
     ) -> Result<(), String> {
         let turn_start = Instant::now();
-        self.state.turn_number += 1;
+        let turn_number = self.state.turn_number + 1;
 
         // Create game state JSON
         let state_json = self.state_to_json();
@@ -182,30 +195,66 @@ impl TicTacToe {
 
         // Create move request
         let move_request = MoveRequest {
-            turn_index: self.state.turn_number,
+            turn_index: turn_number,
             game_id: self.game_id.clone(),
             state: state_json,
             expected_move_schema: move_schema,
         };
 
         // Get move from agent
-        let move_response: MoveResponse = agent
-            .execute_turn(&move_request)
-            .await
-            .map_err(|e| format!("Agent error: {}", e))?;
+        let move_response: MoveResponse = match agent.execute_turn(&move_request).await {
+            Ok(response) => response,
+            Err(error) => {
+                let error = format!("Agent error: {error}");
+                self.stats.add_turn(TurnStats {
+                    turn_number,
+                    player: agent.name().to_owned(),
+                    move_made: Value::Null,
+                    time_taken_ms: turn_start.elapsed().as_millis() as u64,
+                    move_valid: false,
+                    error_message: Some(error.clone()),
+                    state_before: state_before.clone(),
+                    state_after: state_before,
+                    diagnostics: None,
+                });
+                return Err(error);
+            }
+        };
 
         let time_taken = turn_start.elapsed();
 
         // Parse move
         let move_data = move_response.chosen_move;
-        let row = move_data
-            .get("row")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| "Missing or invalid 'row' field".to_string())? as u32;
-        let col = move_data
-            .get("col")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| "Missing or invalid 'col' field".to_string())? as u32;
+        let parsed_move = (|| {
+            let row = move_data
+                .get("row")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| "Missing or invalid 'row' field".to_string())?
+                as u32;
+            let col = move_data
+                .get("col")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| "Missing or invalid 'col' field".to_string())?
+                as u32;
+            Ok::<_, String>((row, col))
+        })();
+        let (row, col) = match parsed_move {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                self.stats.add_turn(TurnStats {
+                    turn_number,
+                    player: agent.name().to_owned(),
+                    move_made: move_data,
+                    time_taken_ms: time_taken.as_millis() as u64,
+                    move_valid: false,
+                    error_message: Some(error.clone()),
+                    state_before: state_before.clone(),
+                    state_after: state_before,
+                    diagnostics: move_response.diagnostics,
+                });
+                return Err(error);
+            }
+        };
 
         // Validate move
         let move_valid = self.is_valid_move(row, col);
@@ -218,6 +267,7 @@ impl TicTacToe {
         // Apply move if valid
         let state_after = if move_valid {
             self.state.board[row as usize][col as usize] = Some(player);
+            self.state.turn_number += 1;
             self.state_to_json()
         } else {
             state_before.clone()
@@ -225,7 +275,7 @@ impl TicTacToe {
 
         // Record turn stats
         let turn_stats = TurnStats {
-            turn_number: self.state.turn_number,
+            turn_number,
             player: agent.name().to_string(),
             move_made: move_data.clone(),
             time_taken_ms: time_taken.as_millis() as u64,
@@ -360,9 +410,7 @@ impl TicTacToe {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TicTacToeResult {
-    pub winner: Option<String>,
     pub stats: GameStats,
-    pub error: Option<String>,
 }
 
 #[cfg(test)]
@@ -568,8 +616,31 @@ mod tests {
             .play_game(vec![x, o])
             .await;
 
-        assert_eq!(result.winner.as_deref(), Some("x-agent (X)"));
+        assert_eq!(result.stats.outcome.winner(), Some("x-agent (X)"));
         assert_eq!(result.stats.total_turns(), 5);
-        assert!(result.error.is_none());
+        assert_eq!(result.stats.invalid_moves, 0);
+    }
+
+    #[tokio::test]
+    async fn invalid_attempts_do_not_consume_turns_and_eventually_forfeit() {
+        let invalid_moves = vec![json!({"row": 9, "col": 9}); 3];
+        let x = ScriptedAgent::new("x-agent", invalid_moves);
+        let o = ScriptedAgent::new("o-agent", vec![]);
+
+        let result = TicTacToe::new(TicTacToeConfig::default())
+            .play_game(vec![x, o])
+            .await;
+
+        assert_eq!(result.stats.total_turns(), 3);
+        assert_eq!(result.stats.invalid_moves, 3);
+        assert!(result.stats.turns.iter().all(|turn| turn.turn_number == 1));
+        assert!(matches!(
+            result.stats.outcome,
+            GameOutcome::Forfeit {
+                ref winner,
+                ref loser,
+                ..
+            } if winner == "o-agent" && loser == "x-agent"
+        ));
     }
 }

@@ -6,7 +6,7 @@ use super::connect_four::{ConnectFour, ConnectFourConfig as GameConnectFourConfi
 use super::rock_paper_scissors::{
     RockPaperScissors, RockPaperScissorsConfig as GameRockPaperScissorsConfig,
 };
-use super::stats::GameStats;
+use super::stats::{GameOutcome, GameStats};
 use super::tic_tac_toe::{TicTacToe, TicTacToeConfig as GameTicTacToeConfig};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -92,23 +92,17 @@ pub enum TestResult {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TicTacToeResult {
-    pub winner: Option<String>,
     pub stats: GameStats,
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RockPaperScissorsResult {
-    pub winner: Option<String>,
     pub stats: GameStats,
-    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectFourResult {
-    pub winner: Option<String>,
     pub stats: GameStats,
-    pub error: Option<String>,
 }
 
 impl From<&str> for Game {
@@ -159,9 +153,7 @@ impl Game {
                 let result = game.play_game(agents).await;
 
                 TestResult::TicTacToe(TicTacToeResult {
-                    winner: result.winner.clone(),
                     stats: result.stats,
-                    error: result.error,
                 })
             }
             Game::RockPaperScissors(config) => {
@@ -172,9 +164,7 @@ impl Game {
                 let result = game.play_game(agents).await;
 
                 TestResult::RockPaperScissors(RockPaperScissorsResult {
-                    winner: result.winner.clone(),
                     stats: result.stats,
-                    error: result.error,
                 })
             }
             Game::ConnectFour(config) => {
@@ -187,31 +177,21 @@ impl Game {
                 let result = game.play_game(agents).await;
 
                 TestResult::ConnectFour(ConnectFourResult {
-                    winner: result.winner.clone(),
                     stats: result.stats,
-                    error: result.error,
                 })
             }
         }
     }
 
     fn error_result(&self, error: String) -> TestResult {
+        let mut stats = GameStats::new();
+        stats.outcome = GameOutcome::Error { message: error };
         match self {
-            Game::TicTacToe(_) => TestResult::TicTacToe(TicTacToeResult {
-                winner: None,
-                stats: GameStats::new(),
-                error: Some(error),
-            }),
-            Game::RockPaperScissors(_) => TestResult::RockPaperScissors(RockPaperScissorsResult {
-                winner: None,
-                stats: GameStats::new(),
-                error: Some(error),
-            }),
-            Game::ConnectFour(_) => TestResult::ConnectFour(ConnectFourResult {
-                winner: None,
-                stats: GameStats::new(),
-                error: Some(error),
-            }),
+            Game::TicTacToe(_) => TestResult::TicTacToe(TicTacToeResult { stats }),
+            Game::RockPaperScissors(_) => {
+                TestResult::RockPaperScissors(RockPaperScissorsResult { stats })
+            }
+            Game::ConnectFour(_) => TestResult::ConnectFour(ConnectFourResult { stats }),
         }
     }
 }

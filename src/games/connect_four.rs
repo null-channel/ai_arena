@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::time::Instant;
 
 use crate::agent::{GameAgent, MoveRequest, MoveResponse};
-use crate::games::stats::{GameStats, TurnStats};
+use crate::games::stats::{GameOutcome, GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectFourConfig {
@@ -61,6 +61,8 @@ pub struct ConnectFour {
 }
 
 impl ConnectFour {
+    const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
     pub fn new(config: ConnectFourConfig) -> Self {
         let rows = config.rows as usize;
         let cols = config.cols as usize;
@@ -86,9 +88,12 @@ impl ConnectFour {
         // Ensure we have exactly 2 agents
         if agents.len() != 2 {
             return ConnectFourResult {
-                winner: None,
-                stats: self.stats,
-                error: Some(format!("Expected 2 agents, got {}", agents.len())),
+                stats: GameStats {
+                    outcome: GameOutcome::Error {
+                        message: format!("Expected 2 agents, got {}", agents.len()),
+                    },
+                    ..self.stats
+                },
             };
         }
 
@@ -100,6 +105,7 @@ impl ConnectFour {
             (player_red_agent, Player::Red),
             (player_yellow_agent, Player::Yellow),
         ];
+        let mut consecutive_failures = 0;
 
         let max_turns = self.config.rows * self.config.cols;
 
@@ -114,22 +120,25 @@ impl ConnectFour {
             // Execute turn
             match self.execute_turn(agent, player).await {
                 Ok(()) => {
+                    consecutive_failures = 0;
                     // Check for win condition
                     if self.check_win() {
                         self.state.game_over = true;
                         self.state.winner = Some(self.state.current_player);
-                        self.stats.winner = Some(format!(
-                            "{} ({})",
-                            agent.name(),
-                            self.state.current_player.as_str()
-                        ));
+                        self.stats.outcome = GameOutcome::Winner {
+                            winner: format!(
+                                "{} ({})",
+                                agent.name(),
+                                self.state.current_player.as_str()
+                            ),
+                        };
                         break;
                     }
 
                     // Check for draw (board full)
                     if self.state.turn_number >= max_turns {
                         self.state.game_over = true;
-                        self.stats.draw = true;
+                        self.stats.outcome = GameOutcome::Draw;
                         break;
                     }
 
@@ -137,8 +146,16 @@ impl ConnectFour {
                     self.state.current_player = self.state.current_player.other();
                 }
                 Err(e) => {
-                    // Invalid move - game continues but stats are tracked
-                    eprintln!("Turn error: {}", e);
+                    consecutive_failures += 1;
+                    if consecutive_failures >= Self::MAX_CONSECUTIVE_FAILURES {
+                        let winner = agent_map[1 - current_agent_idx].0.name().to_owned();
+                        self.stats.outcome = GameOutcome::Forfeit {
+                            winner,
+                            loser: agent.name().to_owned(),
+                            reason: e,
+                        };
+                        self.state.game_over = true;
+                    }
                 }
             }
         }
@@ -146,11 +163,7 @@ impl ConnectFour {
         let total_duration = start_time.elapsed();
         self.stats.total_duration_ms = total_duration.as_millis() as u64;
 
-        ConnectFourResult {
-            winner: self.stats.winner.clone(),
-            stats: self.stats,
-            error: None,
-        }
+        ConnectFourResult { stats: self.stats }
     }
 
     async fn execute_turn<A: GameAgent>(
@@ -159,7 +172,7 @@ impl ConnectFour {
         player: Player,
     ) -> Result<(), String> {
         let turn_start = Instant::now();
-        self.state.turn_number += 1;
+        let turn_number = self.state.turn_number + 1;
 
         // Create game state JSON
         let state_json = self.state_to_json();
@@ -181,27 +194,54 @@ impl ConnectFour {
 
         // Create move request
         let move_request = MoveRequest {
-            turn_index: self.state.turn_number,
+            turn_index: turn_number,
             game_id: self.game_id.clone(),
             state: state_json,
             expected_move_schema: move_schema,
         };
 
         // Get move from agent
-        let move_response: MoveResponse = agent
-            .execute_turn(&move_request)
-            .await
-            .map_err(|e| format!("Agent error: {}", e))?;
+        let move_response: MoveResponse = match agent.execute_turn(&move_request).await {
+            Ok(response) => response,
+            Err(error) => {
+                let error = format!("Agent error: {error}");
+                self.stats.add_turn(TurnStats {
+                    turn_number,
+                    player: agent.name().to_owned(),
+                    move_made: Value::Null,
+                    time_taken_ms: turn_start.elapsed().as_millis() as u64,
+                    move_valid: false,
+                    error_message: Some(error.clone()),
+                    state_before: state_before.clone(),
+                    state_after: state_before,
+                    diagnostics: None,
+                });
+                return Err(error);
+            }
+        };
 
         let time_taken = turn_start.elapsed();
 
         // Parse move
         let move_data = move_response.chosen_move;
-        let column = move_data
-            .get("column")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| "Missing or invalid 'column' field".to_string())?
-            as u32;
+        let column = match move_data.get("column").and_then(|v| v.as_u64()) {
+            Some(column) => column as u32,
+            None => {
+                let error = "Missing or invalid 'column' field".to_string();
+                self.stats.add_turn(TurnStats {
+                    turn_number,
+                    player: agent.name().to_owned(),
+                    move_made: move_data,
+                    time_taken_ms: time_taken.as_millis() as u64,
+                    move_valid: false,
+                    error_message: Some(error.clone()),
+                    state_before: state_before.clone(),
+                    state_after: state_before,
+                    diagnostics: move_response.diagnostics,
+                });
+                return Err(error);
+            }
+        };
 
         // Validate and apply move
         let move_valid = self.is_valid_move(column);
@@ -217,6 +257,7 @@ impl ConnectFour {
         // Apply move if valid
         let state_after = if move_valid {
             self.drop_piece(column, player);
+            self.state.turn_number += 1;
             self.state_to_json()
         } else {
             state_before.clone()
@@ -224,7 +265,7 @@ impl ConnectFour {
 
         // Record turn stats
         let turn_stats = TurnStats {
-            turn_number: self.state.turn_number,
+            turn_number,
             player: agent.name().to_string(),
             move_made: move_data.clone(),
             time_taken_ms: time_taken.as_millis() as u64,
@@ -369,9 +410,7 @@ impl ConnectFour {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectFourResult {
-    pub winner: Option<String>,
     pub stats: GameStats,
-    pub error: Option<String>,
 }
 
 #[cfg(test)]
