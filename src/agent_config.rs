@@ -1,4 +1,7 @@
-use crate::agent::{AIAgent, AgentError, AgentResult};
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::agent::{AIAgent, AgentError, AgentResult, ManagedAgent};
 use crate::agents::{anthropic::AnthropicAgent, ollama::OllamaAgent, openai::OpenAIAgent};
 use crate::secrets::SecretsManager;
 use clap::ValueEnum;
@@ -26,16 +29,89 @@ pub enum AgentKind {
     Ollama,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Args)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct AIAgentConfig {
     pub model: String,
     pub temp: f32,
     pub seed: Option<u64>,
-    #[arg(value_enum)]
     pub agent: AgentKind,
     /// Secret profile name to use for API keys (optional, falls back to environment variables)
-    #[arg(long)]
     pub secret_profile: Option<String>,
+    #[serde(default)]
+    pub runtime: AgentRuntimeConfig,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Args)]
+pub struct AgentRuntimeConfig {
+    /// Maximum duration of one provider request, including response parsing.
+    #[arg(long, default_value_t = 60_000, value_parser = clap::value_parser!(u64).range(1..))]
+    #[serde(default = "default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    /// Number of retries after transient provider failures or timeouts.
+    #[arg(long, default_value_t = 2)]
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    /// Initial retry delay; later delays use exponential backoff.
+    #[arg(long, default_value_t = 250)]
+    #[serde(default = "default_retry_backoff_ms")]
+    pub retry_backoff_ms: u64,
+    /// Optional cumulative provider-reported token limit per agent and match.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    #[serde(default)]
+    pub max_total_tokens: Option<u64>,
+    /// Maximum provider requests in flight within one match.
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u32).range(1..))]
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: u32,
+}
+
+const fn default_request_timeout_ms() -> u64 {
+    60_000
+}
+
+const fn default_max_retries() -> u32 {
+    2
+}
+
+const fn default_retry_backoff_ms() -> u64 {
+    250
+}
+
+const fn default_max_concurrent_requests() -> u32 {
+    2
+}
+
+impl Default for AgentRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            request_timeout_ms: default_request_timeout_ms(),
+            max_retries: default_max_retries(),
+            retry_backoff_ms: default_retry_backoff_ms(),
+            max_total_tokens: None,
+            max_concurrent_requests: default_max_concurrent_requests(),
+        }
+    }
+}
+
+impl AgentRuntimeConfig {
+    pub(crate) fn validate(&self) -> AgentResult<()> {
+        if self.request_timeout_ms == 0 {
+            return Err(AgentError::InvalidRequest(
+                "request timeout must be greater than zero".into(),
+            ));
+        }
+        if self.max_concurrent_requests == 0 {
+            return Err(AgentError::InvalidRequest(
+                "max concurrent requests must be greater than zero".into(),
+            ));
+        }
+        if self.max_total_tokens == Some(0) {
+            return Err(AgentError::InvalidRequest(
+                "max total tokens must be greater than zero".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl AIAgentConfig {
@@ -48,6 +124,12 @@ impl AIAgentConfig {
                 "temperature must be finite and between 0.0 and 2.0, got {}",
                 self.temp
             )));
+        }
+        self.runtime.validate()?;
+        if self.agent == AgentKind::Anthropic && self.runtime.max_total_tokens.is_some() {
+            return Err(AgentError::InvalidRequest(
+                "Anthropic token budgets are unavailable through the current connector".into(),
+            ));
         }
         Ok(())
     }
@@ -63,14 +145,31 @@ impl AIAgentConfig {
     }
 }
 
-pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<AIAgent>> {
+pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<ManagedAgent<AIAgent>>> {
+    for config in &configs {
+        config.validate()?;
+    }
+    let concurrency = configs
+        .first()
+        .map(|config| config.runtime.max_concurrent_requests)
+        .unwrap_or(default_max_concurrent_requests());
+    if configs
+        .iter()
+        .any(|config| config.runtime.max_concurrent_requests != concurrency)
+    {
+        return Err(AgentError::InvalidRequest(
+            "all agents in a match must use the same concurrency limit".into(),
+        ));
+    }
+    let concurrency = usize::try_from(concurrency)
+        .map_err(|_| AgentError::InvalidRequest("concurrency limit is too large".into()))?;
+    let limiter = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let secrets_manager =
         SecretsManager::load().map_err(|e| AgentError::Internal(format!("load secrets: {e}")))?;
 
     configs
         .into_iter()
         .map(|cfg| {
-            cfg.validate()?;
             let secret_profile = cfg.secret_profile.as_deref();
             let name = cfg.display_name();
             let agent = match cfg.agent {
@@ -111,7 +210,14 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<AIAgent>> {
                     )?)
                 }
             };
-            Ok(agent)
+            Ok(ManagedAgent::new(
+                agent,
+                Duration::from_millis(cfg.runtime.request_timeout_ms),
+                cfg.runtime.max_retries,
+                Duration::from_millis(cfg.runtime.retry_backoff_ms),
+                cfg.runtime.max_total_tokens,
+                Arc::clone(&limiter),
+            ))
         })
         .collect()
 }
@@ -127,6 +233,7 @@ mod tests {
             seed: Some(42),
             agent: AgentKind::Ollama,
             secret_profile: None,
+            runtime: AgentRuntimeConfig::default(),
         }
     }
 
@@ -142,5 +249,14 @@ mod tests {
             config(0.7, "model").display_name(),
             "Ollama:model [temp=0.7, seed=42]"
         );
+
+        let mut invalid_runtime = config(0.7, "model");
+        invalid_runtime.runtime.request_timeout_ms = 0;
+        assert!(invalid_runtime.validate().is_err());
+
+        let mut unsupported_budget = config(0.7, "model");
+        unsupported_budget.agent = AgentKind::Anthropic;
+        unsupported_budget.runtime.max_total_tokens = Some(1_000);
+        assert!(unsupported_budget.validate().is_err());
     }
 }

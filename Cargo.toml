@@ -8,7 +8,7 @@ clap = { version = "4.5.47", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.143"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-tokio = { version = "1.47", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "time"] }
 async-trait = "0.1.83"
 async-openai = "0.29"
 rig-core = "0.19.0"
