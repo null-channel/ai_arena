@@ -126,11 +126,7 @@ impl ConnectFour {
                         self.state.game_over = true;
                         self.state.winner = Some(self.state.current_player);
                         self.stats.outcome = GameOutcome::Winner {
-                            winner: format!(
-                                "{} ({})",
-                                agent.name(),
-                                self.state.current_player.as_str()
-                            ),
+                            winner: agent.name().to_owned(),
                         };
                         break;
                     }

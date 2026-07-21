@@ -121,11 +121,7 @@ impl TicTacToe {
                         self.state.game_over = true;
                         self.state.winner = Some(self.state.current_player);
                         self.stats.outcome = GameOutcome::Winner {
-                            winner: format!(
-                                "{} ({})",
-                                agent.name(),
-                                self.state.current_player.as_str()
-                            ),
+                            winner: agent.name().to_owned(),
                         };
                         break;
                     }
@@ -619,7 +615,7 @@ mod tests {
             .play_game(vec![x, o])
             .await;
 
-        assert_eq!(result.stats.outcome.winner(), Some("x-agent (X)"));
+        assert_eq!(result.stats.outcome.winner(), Some("x-agent"));
         assert_eq!(result.stats.total_turns(), 5);
         assert_eq!(result.stats.invalid_moves, 0);
     }

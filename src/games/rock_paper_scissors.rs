@@ -152,13 +152,13 @@ impl RockPaperScissors {
             if self.state.player_one_score >= rounds_to_win {
                 self.state.game_over = true;
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 1)", player_one_agent.name()),
+                    winner: player_one_agent.name().to_owned(),
                 };
                 break;
             } else if self.state.player_two_score >= rounds_to_win {
                 self.state.game_over = true;
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 2)", player_two_agent.name()),
+                    winner: player_two_agent.name().to_owned(),
                 };
                 break;
             }
@@ -168,11 +168,11 @@ impl RockPaperScissors {
         if !self.state.game_over {
             if self.state.player_one_score > self.state.player_two_score {
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 1)", player_one_agent.name()),
+                    winner: player_one_agent.name().to_owned(),
                 };
             } else if self.state.player_two_score > self.state.player_one_score {
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 2)", player_two_agent.name()),
+                    winner: player_two_agent.name().to_owned(),
                 };
             } else {
                 self.stats.outcome = GameOutcome::Draw;
