@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Instant;
 
-use crate::agent::{GameAgent, MoveRequest, MoveResponse};
-use crate::games::stats::{GameStats, TurnStats};
+use crate::agent::{AgentResult, GameAgent, MoveRequest, MoveResponse};
+use crate::games::stats::{GameOutcome, GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RockPaperScissorsConfig {
@@ -59,6 +59,16 @@ pub struct RoundResult {
     pub winner: Option<usize>, // 0 for player 1, 1 for player 2, None for tie
 }
 
+struct RoundExecution {
+    result: RoundResult,
+    failure: Option<RoundFailure>,
+}
+
+enum RoundFailure {
+    Player { index: usize, reason: String },
+    Both { reason: String },
+}
+
 pub struct RockPaperScissors {
     config: RockPaperScissorsConfig,
     state: RockPaperScissorsState,
@@ -88,9 +98,12 @@ impl RockPaperScissors {
         // Ensure we have exactly 2 agents
         if agents.len() != 2 {
             return RockPaperScissorsResult {
-                winner: None,
-                stats: self.stats,
-                error: Some(format!("Expected 2 agents, got {}", agents.len())),
+                stats: GameStats {
+                    outcome: GameOutcome::Error {
+                        message: format!("Expected 2 agents, got {}", agents.len()),
+                    },
+                    ..self.stats
+                },
             };
         }
 
@@ -104,19 +117,29 @@ impl RockPaperScissors {
             self.state.round += 1;
 
             // Execute round - both players choose simultaneously
-            let round_result = match self.execute_round(player_one_agent, player_two_agent).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("Round error: {}", e);
-                    // Continue with a tie if there's an error
-                    RoundResult {
-                        round_number: self.state.round,
-                        player_one_choice: None,
-                        player_two_choice: None,
-                        winner: None,
+            let execution = self.execute_round(player_one_agent, player_two_agent).await;
+            let round_result = execution.result;
+            self.state.round_history.push(round_result.clone());
+
+            if let Some(failure) = execution.failure {
+                self.state.game_over = true;
+                self.stats.outcome = match failure {
+                    RoundFailure::Player { index, reason } => {
+                        let (winner, loser) = if index == 0 {
+                            (player_two_agent.name(), player_one_agent.name())
+                        } else {
+                            (player_one_agent.name(), player_two_agent.name())
+                        };
+                        GameOutcome::Forfeit {
+                            winner: winner.to_owned(),
+                            loser: loser.to_owned(),
+                            reason,
+                        }
                     }
-                }
-            };
+                    RoundFailure::Both { reason } => GameOutcome::Error { message: reason },
+                };
+                break;
+            }
 
             // Update scores
             match round_result.winner {
@@ -125,16 +148,18 @@ impl RockPaperScissors {
                 _ => {} // Tie, no score change
             }
 
-            self.state.round_history.push(round_result.clone());
-
             // Check for game end
             if self.state.player_one_score >= rounds_to_win {
                 self.state.game_over = true;
-                self.stats.winner = Some(format!("{} (Player 1)", player_one_agent.name()));
+                self.stats.outcome = GameOutcome::Winner {
+                    winner: format!("{} (Player 1)", player_one_agent.name()),
+                };
                 break;
             } else if self.state.player_two_score >= rounds_to_win {
                 self.state.game_over = true;
-                self.stats.winner = Some(format!("{} (Player 2)", player_two_agent.name()));
+                self.stats.outcome = GameOutcome::Winner {
+                    winner: format!("{} (Player 2)", player_two_agent.name()),
+                };
                 break;
             }
         }
@@ -142,11 +167,15 @@ impl RockPaperScissors {
         // If game ended without a clear winner (all rounds played, tie)
         if !self.state.game_over {
             if self.state.player_one_score > self.state.player_two_score {
-                self.stats.winner = Some(format!("{} (Player 1)", player_one_agent.name()));
+                self.stats.outcome = GameOutcome::Winner {
+                    winner: format!("{} (Player 1)", player_one_agent.name()),
+                };
             } else if self.state.player_two_score > self.state.player_one_score {
-                self.stats.winner = Some(format!("{} (Player 2)", player_two_agent.name()));
+                self.stats.outcome = GameOutcome::Winner {
+                    winner: format!("{} (Player 2)", player_two_agent.name()),
+                };
             } else {
-                self.stats.draw = true;
+                self.stats.outcome = GameOutcome::Draw;
             }
             self.state.game_over = true;
         }
@@ -154,20 +183,14 @@ impl RockPaperScissors {
         let total_duration = start_time.elapsed();
         self.stats.total_duration_ms = total_duration.as_millis() as u64;
 
-        RockPaperScissorsResult {
-            winner: self.stats.winner.clone(),
-            stats: self.stats,
-            error: None,
-        }
+        RockPaperScissorsResult { stats: self.stats }
     }
 
     async fn execute_round(
         &mut self,
         player_one_agent: &impl GameAgent,
         player_two_agent: &impl GameAgent,
-    ) -> Result<RoundResult, String> {
-        let round_start = Instant::now();
-
+    ) -> RoundExecution {
         // Create game state JSON
         let state_json = self.state_to_json();
         let state_before = state_json.clone();
@@ -202,34 +225,25 @@ impl RockPaperScissors {
             expected_move_schema: move_schema.clone(),
         };
 
-        // Get moves from both agents (could be parallelized in the future)
-        let move_response_one: MoveResponse = player_one_agent
-            .execute_turn(&move_request_one)
-            .await
-            .map_err(|e| format!("Player 1 error: {}", e))?;
-
-        let move_response_two: MoveResponse = player_two_agent
-            .execute_turn(&move_request_two)
-            .await
-            .map_err(|e| format!("Player 2 error: {}", e))?;
-
-        let time_taken = round_start.elapsed();
-
-        // Parse choices
-        let choice_one_result = self.parse_choice(&move_response_one.chosen_move, "Player 1");
-        let choice_two_result = self.parse_choice(&move_response_two.chosen_move, "Player 2");
-
-        let (choice_one, choice_one_valid, choice_one_error) = match choice_one_result {
-            Ok(Some(c)) => (Some(c), true, None),
-            Ok(None) => (None, false, Some("Invalid choice".to_string())),
-            Err(e) => (None, false, Some(e)),
+        let player_one_future = async {
+            let start = Instant::now();
+            let response = player_one_agent.execute_turn(&move_request_one).await;
+            (response, start.elapsed())
         };
-
-        let (choice_two, choice_two_valid, choice_two_error) = match choice_two_result {
-            Ok(Some(c)) => (Some(c), true, None),
-            Ok(None) => (None, false, Some("Invalid choice".to_string())),
-            Err(e) => (None, false, Some(e)),
+        let player_two_future = async {
+            let start = Instant::now();
+            let response = player_two_agent.execute_turn(&move_request_two).await;
+            (response, start.elapsed())
         };
+        let ((response_one, duration_one), (response_two, duration_two)) =
+            tokio::join!(player_one_future, player_two_future);
+
+        let (move_one, diagnostics_one, choice_one, choice_one_error) =
+            self.evaluate_response(response_one, "Player 1");
+        let (move_two, diagnostics_two, choice_two, choice_two_error) =
+            self.evaluate_response(response_two, "Player 2");
+        let choice_one_valid = choice_one_error.is_none();
+        let choice_two_valid = choice_two_error.is_none();
 
         // Determine winner (only if both choices are valid)
         let winner = if let (Some(c1), Some(c2)) = (choice_one, choice_two) {
@@ -248,13 +262,13 @@ impl RockPaperScissors {
         let turn_stats_one = TurnStats {
             turn_number: turn_number * 2 - 1, // Odd numbers for player 1
             player: player_one_agent.name().to_string(),
-            move_made: move_response_one.chosen_move.clone(),
-            time_taken_ms: time_taken.as_millis() as u64,
+            move_made: move_one,
+            time_taken_ms: duration_one.as_millis() as u64,
             move_valid: choice_one_valid,
-            error_message: choice_one_error,
+            error_message: choice_one_error.clone(),
             state_before: state_before.clone(),
             state_after: self.state_to_json(),
-            diagnostics: move_response_one.diagnostics,
+            diagnostics: diagnostics_one,
         };
         self.stats.add_turn(turn_stats_one);
 
@@ -262,22 +276,72 @@ impl RockPaperScissors {
         let turn_stats_two = TurnStats {
             turn_number: turn_number * 2, // Even numbers for player 2
             player: player_two_agent.name().to_string(),
-            move_made: move_response_two.chosen_move.clone(),
-            time_taken_ms: time_taken.as_millis() as u64,
+            move_made: move_two,
+            time_taken_ms: duration_two.as_millis() as u64,
             move_valid: choice_two_valid,
-            error_message: choice_two_error,
+            error_message: choice_two_error.clone(),
             state_before: state_before.clone(),
             state_after: self.state_to_json(),
-            diagnostics: move_response_two.diagnostics,
+            diagnostics: diagnostics_two,
         };
         self.stats.add_turn(turn_stats_two);
 
-        Ok(RoundResult {
-            round_number: turn_number,
-            player_one_choice: choice_one,
-            player_two_choice: choice_two,
-            winner,
-        })
+        let failure = match (choice_one_error, choice_two_error) {
+            (Some(one), Some(two)) => Some(RoundFailure::Both {
+                reason: format!("both agents failed: {one}; {two}"),
+            }),
+            (Some(reason), None) => Some(RoundFailure::Player { index: 0, reason }),
+            (None, Some(reason)) => Some(RoundFailure::Player { index: 1, reason }),
+            (None, None) => None,
+        };
+
+        RoundExecution {
+            result: RoundResult {
+                round_number: turn_number,
+                player_one_choice: choice_one,
+                player_two_choice: choice_two,
+                winner,
+            },
+            failure,
+        }
+    }
+
+    fn evaluate_response(
+        &self,
+        response: AgentResult<MoveResponse>,
+        player_name: &str,
+    ) -> (Value, Option<String>, Option<Choice>, Option<String>) {
+        match response {
+            Ok(response) => {
+                let choice = self.parse_choice(&response.chosen_move, player_name);
+                match choice {
+                    Ok(Some(choice)) => (
+                        response.chosen_move,
+                        response.diagnostics,
+                        Some(choice),
+                        None,
+                    ),
+                    Ok(None) => (
+                        response.chosen_move,
+                        response.diagnostics,
+                        None,
+                        Some(format!("{player_name}: invalid choice")),
+                    ),
+                    Err(error) => (
+                        response.chosen_move,
+                        response.diagnostics,
+                        None,
+                        Some(error),
+                    ),
+                }
+            }
+            Err(error) => (
+                Value::Null,
+                None,
+                None,
+                Some(format!("{player_name}: agent error: {error}")),
+            ),
+        }
     }
 
     fn parse_choice(&self, move_data: &Value, player_name: &str) -> Result<Option<Choice>, String> {
@@ -323,14 +387,13 @@ impl RockPaperScissors {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RockPaperScissorsResult {
-    pub winner: Option<String>,
     pub stats: GameStats,
-    pub error: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::ScriptedAgent;
 
     #[test]
     fn test_choice_as_str() {
@@ -440,5 +503,26 @@ mod tests {
     fn test_config_default() {
         let config = RockPaperScissorsConfig::default();
         assert_eq!(config.rounds, 3);
+    }
+
+    #[tokio::test]
+    async fn invalid_choice_is_recorded_as_a_forfeit() {
+        let player_one = ScriptedAgent::new("one", vec![json!({"choice": "lizard"})]);
+        let player_two = ScriptedAgent::new("two", vec![json!({"choice": "rock"})]);
+
+        let result = RockPaperScissors::new(RockPaperScissorsConfig::default())
+            .play_game(vec![player_one, player_two])
+            .await;
+
+        assert_eq!(result.stats.total_turns(), 2);
+        assert_eq!(result.stats.invalid_moves, 1);
+        assert!(matches!(
+            result.stats.outcome,
+            GameOutcome::Forfeit {
+                ref winner,
+                ref loser,
+                ..
+            } if winner == "two" && loser == "one"
+        ));
     }
 }

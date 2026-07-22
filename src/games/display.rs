@@ -5,7 +5,7 @@ use tabled::{
 };
 
 use super::game::TestResult;
-use super::stats::GameStats;
+use super::stats::{GameOutcome, GameStats};
 
 /// Display game statistics in a formatted table
 pub fn print_game_stats(game_name: &str, result: &TestResult) {
@@ -15,17 +15,17 @@ pub fn print_game_stats(game_name: &str, result: &TestResult) {
 
     match result {
         TestResult::TicTacToe(result) => {
-            print_game_summary(&result.stats, result.error.as_deref());
+            print_game_summary(&result.stats);
             print_turn_table(&result.stats);
             print_player_summary(&result.stats);
         }
         TestResult::RockPaperScissors(result) => {
-            print_game_summary(&result.stats, result.error.as_deref());
+            print_game_summary(&result.stats);
             print_turn_table(&result.stats);
             print_player_summary(&result.stats);
         }
         TestResult::ConnectFour(result) => {
-            print_game_summary(&result.stats, result.error.as_deref());
+            print_game_summary(&result.stats);
             print_turn_table(&result.stats);
             print_player_summary(&result.stats);
         }
@@ -34,19 +34,20 @@ pub fn print_game_stats(game_name: &str, result: &TestResult) {
     println!("\n{}", "=".repeat(80));
 }
 
-fn print_game_summary(stats: &GameStats, error: Option<&str>) {
+fn print_game_summary(stats: &GameStats) {
     println!("\n📊 GAME SUMMARY");
     println!("{}", "-".repeat(80));
 
-    if let Some(err) = error {
-        println!("❌ Error: {}", err);
-        return;
-    }
-
-    match &stats.winner {
-        Some(winner) => println!("🏆 Winner: {}", winner),
-        None if stats.draw => println!("🤝 Result: Draw"),
-        None => println!("⚠️  Result: Incomplete"),
+    match &stats.outcome {
+        GameOutcome::Winner { winner } => println!("🏆 Winner: {winner}"),
+        GameOutcome::Draw => println!("🤝 Result: Draw"),
+        GameOutcome::Forfeit {
+            winner,
+            loser,
+            reason,
+        } => println!("🏳️  {loser} forfeited to {winner}: {reason}"),
+        GameOutcome::Error { message } => println!("❌ Error: {message}"),
+        GameOutcome::InProgress => println!("⚠️  Result: Incomplete"),
     }
 
     println!(

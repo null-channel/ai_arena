@@ -24,6 +24,33 @@ pub struct TurnStats {
     pub diagnostics: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum GameOutcome {
+    InProgress,
+    Winner {
+        winner: String,
+    },
+    Draw,
+    Forfeit {
+        winner: String,
+        loser: String,
+        reason: String,
+    },
+    Error {
+        message: String,
+    },
+}
+
+impl GameOutcome {
+    pub fn winner(&self) -> Option<&str> {
+        match self {
+            Self::Winner { winner } | Self::Forfeit { winner, .. } => Some(winner),
+            Self::InProgress | Self::Draw | Self::Error { .. } => None,
+        }
+    }
+}
+
 /// Statistics for a complete game
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GameStats {
@@ -33,10 +60,8 @@ pub struct GameStats {
     pub total_duration_ms: u64,
     /// Number of invalid moves attempted
     pub invalid_moves: u32,
-    /// Winner of the game (None if draw or incomplete)
-    pub winner: Option<String>,
-    /// Whether the game ended in a draw
-    pub draw: bool,
+    /// The single authoritative state describing how the game ended.
+    pub outcome: GameOutcome,
 }
 
 impl GameStats {
@@ -45,8 +70,7 @@ impl GameStats {
             turns: Vec::new(),
             total_duration_ms: 0,
             invalid_moves: 0,
-            winner: None,
-            draw: false,
+            outcome: GameOutcome::InProgress,
         }
     }
 
@@ -87,8 +111,7 @@ mod tests {
         assert_eq!(stats.turns.len(), 0);
         assert_eq!(stats.total_duration_ms, 0);
         assert_eq!(stats.invalid_moves, 0);
-        assert_eq!(stats.winner, None);
-        assert!(!stats.draw);
+        assert_eq!(stats.outcome, GameOutcome::InProgress);
     }
 
     #[test]

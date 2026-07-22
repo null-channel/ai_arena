@@ -184,17 +184,16 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
                 print_game_stats(game.name(), &result);
             } else {
                 // Brief summary for multiple repetitions
-                let winner = match &result {
-                    TestResult::TicTacToe(r) => r.winner.as_ref(),
-                    TestResult::RockPaperScissors(r) => r.winner.as_ref(),
-                    TestResult::ConnectFour(r) => r.winner.as_ref(),
+                let outcome = match &result {
+                    TestResult::TicTacToe(r) => &r.stats.outcome,
+                    TestResult::RockPaperScissors(r) => &r.stats.outcome,
+                    TestResult::ConnectFour(r) => &r.stats.outcome,
                 };
-                println!(
-                    "  Result: {}",
-                    winner
-                        .map(|w| format!("Winner: {}", w))
-                        .unwrap_or_else(|| "Draw".to_string())
-                );
+                if let Some(winner) = outcome.winner() {
+                    println!("  Result: Winner: {winner}");
+                } else {
+                    println!("  Result: {outcome:?}");
+                }
             }
         }
     }
