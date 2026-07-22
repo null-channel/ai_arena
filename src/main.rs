@@ -6,7 +6,7 @@ mod games;
 mod report;
 mod secrets;
 
-use agent_config::{AIAgentConfig, AgentKind};
+use agent_config::{AIAgentConfig, AgentKind, AgentRuntimeConfig};
 use clap::{ArgGroup, CommandFactory, Parser, error::ErrorKind};
 use csv_runner::run_csv_batch;
 use games::{Game, print_game_stats};
@@ -23,6 +23,8 @@ struct Args {
     /// Write one machine-readable match record per line.
     #[arg(long)]
     output_jsonl: Option<String>,
+    #[clap(flatten)]
+    runtime_config: AgentRuntimeConfig,
     #[clap(flatten)]
     agent_config: ClapAgentConfig,
     #[arg(
@@ -70,7 +72,10 @@ fn parse_temperature(value: &str) -> Result<f32, String> {
     }
 }
 
-fn clap_agents_to_real_agents(agents: ClapAgentConfig) -> Result<Vec<AIAgentConfig>, String> {
+fn clap_agents_to_real_agents(
+    agents: ClapAgentConfig,
+    runtime: AgentRuntimeConfig,
+) -> Result<Vec<AIAgentConfig>, String> {
     Ok(vec![
         AIAgentConfig {
             model: agents
@@ -82,6 +87,7 @@ fn clap_agents_to_real_agents(agents: ClapAgentConfig) -> Result<Vec<AIAgentConf
                 .agent_one_kind
                 .ok_or("--agent-one-kind is required for a manual game")?,
             secret_profile: agents.agent_one_secret_profile,
+            runtime: runtime.clone(),
         },
         AIAgentConfig {
             model: agents
@@ -93,6 +99,7 @@ fn clap_agents_to_real_agents(agents: ClapAgentConfig) -> Result<Vec<AIAgentConf
                 .agent_two_kind
                 .ok_or("--agent-two-kind is required for a manual game")?,
             secret_profile: agents.agent_two_secret_profile,
+            runtime,
         },
     ])
 }
@@ -114,16 +121,18 @@ async fn main() {
     };
     if let Some(test_file) = args.test_file {
         // Run CSV batch file
-        if let Err(e) = run_csv_batch(&test_file, true, output.as_mut()).await {
+        if let Err(e) = run_csv_batch(&test_file, true, output.as_mut(), &args.runtime_config).await
+        {
             eprintln!("Error running CSV batch: {}", e);
             std::process::exit(1);
         }
     } else if let Some(game_name_arg) = args.game_name {
-        let agents = clap_agents_to_real_agents(args.agent_config).unwrap_or_else(|message| {
-            Args::command()
-                .error(ErrorKind::MissingRequiredArgument, message)
-                .exit()
-        });
+        let agents = clap_agents_to_real_agents(args.agent_config, args.runtime_config)
+            .unwrap_or_else(|message| {
+                Args::command()
+                    .error(ErrorKind::MissingRequiredArgument, message)
+                    .exit()
+            });
         let game = Game::try_from(game_name_arg.as_str()).expect("validated by clap");
         let game_name = game.name();
         let mut summary = OutcomeSummary::default();
@@ -208,5 +217,31 @@ mod tests {
         assert_eq!(args.repetitions, 2);
         assert_eq!(args.agent_config.agent_one_temp, 0.7);
         assert_eq!(args.agent_config.agent_two_seed, 0);
+        assert_eq!(args.runtime_config.request_timeout_ms, 60_000);
+        assert_eq!(args.runtime_config.max_retries, 2);
+        assert_eq!(args.runtime_config.max_concurrent_requests, 2);
+    }
+
+    #[test]
+    fn parses_runtime_policy() {
+        let mut command = manual_args("1");
+        command.extend([
+            "--request-timeout-ms",
+            "5000",
+            "--max-retries",
+            "4",
+            "--retry-backoff-ms",
+            "100",
+            "--max-total-tokens",
+            "2000",
+            "--max-concurrent-requests",
+            "1",
+        ]);
+        let args = Args::try_parse_from(command).unwrap();
+        assert_eq!(args.runtime_config.request_timeout_ms, 5_000);
+        assert_eq!(args.runtime_config.max_retries, 4);
+        assert_eq!(args.runtime_config.retry_backoff_ms, 100);
+        assert_eq!(args.runtime_config.max_total_tokens, Some(2_000));
+        assert_eq!(args.runtime_config.max_concurrent_requests, 1);
     }
 }

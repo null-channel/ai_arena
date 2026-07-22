@@ -3,7 +3,7 @@ use std::fs::File;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::agent_config::{AIAgentConfig, AgentKind};
+use crate::agent_config::{AIAgentConfig, AgentKind, AgentRuntimeConfig};
 use crate::games::{Game, print_game_stats};
 use crate::report::{JsonlWriter, MatchRecord, OutcomeSummary, agents_for_repetition};
 
@@ -22,10 +22,15 @@ pub struct CsvTestCase {
     pub agent_two_secret_profile: Option<String>,
     pub repetitions: u32,
     pub description: String,
+    pub runtime: AgentRuntimeConfig,
 }
 
 impl CsvTestCase {
-    fn from_record(record: csv::StringRecord, headers: &csv::StringRecord) -> Result<Self, String> {
+    fn from_record(
+        record: csv::StringRecord,
+        headers: &csv::StringRecord,
+        runtime_defaults: &AgentRuntimeConfig,
+    ) -> Result<Self, String> {
         let parse_agent_kind = |name: &str| -> Result<AgentKind, String> {
             let value = required_field(&record, headers, name)?;
             match value.to_uppercase().as_str() {
@@ -55,6 +60,39 @@ impl CsvTestCase {
         if repetitions == 0 {
             return Err("Invalid repetitions: must be greater than zero".into());
         }
+        let runtime = AgentRuntimeConfig {
+            request_timeout_ms: parse_optional(
+                &record,
+                headers,
+                "request_timeout_ms",
+                runtime_defaults.request_timeout_ms,
+            )?,
+            max_retries: parse_optional(
+                &record,
+                headers,
+                "max_retries",
+                runtime_defaults.max_retries,
+            )?,
+            retry_backoff_ms: parse_optional(
+                &record,
+                headers,
+                "retry_backoff_ms",
+                runtime_defaults.retry_backoff_ms,
+            )?,
+            max_total_tokens: parse_optional_value(
+                &record,
+                headers,
+                "max_total_tokens",
+                runtime_defaults.max_total_tokens,
+            )?,
+            max_concurrent_requests: parse_optional(
+                &record,
+                headers,
+                "max_concurrent_requests",
+                runtime_defaults.max_concurrent_requests,
+            )?,
+        };
+        runtime.validate().map_err(|error| error.to_string())?;
 
         Ok(CsvTestCase {
             game_name,
@@ -70,6 +108,7 @@ impl CsvTestCase {
             agent_two_secret_profile: optional_field(&record, headers, "agent_two_secret_profile"),
             repetitions,
             description: optional_field(&record, headers, "description").unwrap_or_default(),
+            runtime,
         })
     }
 
@@ -81,6 +120,7 @@ impl CsvTestCase {
                 seed: Some(self.agent_one_seed),
                 agent: self.agent_one_kind,
                 secret_profile: self.agent_one_secret_profile.clone(),
+                runtime: self.runtime.clone(),
             },
             AIAgentConfig {
                 model: self.agent_two_model.clone(),
@@ -88,6 +128,7 @@ impl CsvTestCase {
                 seed: Some(self.agent_two_seed),
                 agent: self.agent_two_kind,
                 secret_profile: self.agent_two_secret_profile.clone(),
+                runtime: self.runtime.clone(),
             },
         ]
     }
@@ -133,7 +174,28 @@ where
     })
 }
 
-pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String> {
+fn parse_optional_value<T>(
+    record: &csv::StringRecord,
+    headers: &csv::StringRecord,
+    name: &str,
+    default: Option<T>,
+) -> Result<Option<T>, String>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    optional_field(record, headers, name).map_or(Ok(default), |value| {
+        value
+            .parse()
+            .map(Some)
+            .map_err(|error| format!("Invalid {name}: {error}"))
+    })
+}
+
+pub fn read_csv_file<P: AsRef<Path>>(
+    path: P,
+    runtime_defaults: &AgentRuntimeConfig,
+) -> Result<Vec<CsvTestCase>, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open CSV file: {}", e))?;
     let mut reader = ReaderBuilder::new()
         .has_headers(true)
@@ -149,7 +211,7 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String
     for (row_num, result) in reader.records().enumerate() {
         let record =
             result.map_err(|e| format!("Failed to read CSV row {}: {}", row_num + 2, e))?;
-        match CsvTestCase::from_record(record, &headers) {
+        match CsvTestCase::from_record(record, &headers, runtime_defaults) {
             Ok(test_case) => test_cases.push(test_case),
             Err(e) => return Err(format!("Error parsing row {}: {}", row_num + 2, e)),
         }
@@ -162,8 +224,9 @@ pub async fn run_csv_batch(
     csv_path: &str,
     verbose: bool,
     mut output: Option<&mut JsonlWriter>,
+    runtime_defaults: &AgentRuntimeConfig,
 ) -> Result<(), String> {
-    let test_cases = read_csv_file(csv_path)?;
+    let test_cases = read_csv_file(csv_path, runtime_defaults)?;
 
     println!("\n{}", "=".repeat(80));
     println!("CSV BATCH RUN");
@@ -282,7 +345,7 @@ mod tests {
             "Test game",
         ]);
 
-        let result = CsvTestCase::from_record(record, &headers);
+        let result = CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default());
         assert!(result.is_ok());
         let test_case = result.unwrap();
 
@@ -318,7 +381,7 @@ mod tests {
             "Full test",
         ]);
 
-        let result = CsvTestCase::from_record(record, &headers);
+        let result = CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default());
         assert!(result.is_ok());
         let test_case = result.unwrap();
 
@@ -362,7 +425,7 @@ mod tests {
             "",
         ]);
 
-        let result = CsvTestCase::from_record(record, &headers);
+        let result = CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default());
         assert!(result.is_ok());
         let test_case = result.unwrap();
         assert_eq!(test_case.agent_one_kind, AgentKind::OpenAI);
@@ -388,7 +451,7 @@ mod tests {
             "",
         ]);
 
-        let result = CsvTestCase::from_record(record, &headers);
+        let result = CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid agent kind"));
     }
@@ -398,7 +461,7 @@ mod tests {
         let headers = csv::StringRecord::from(vec!["game_name", "agent_one_kind"]);
         let record = csv::StringRecord::from(vec!["TicTacToe", "OpenAI"]);
 
-        let result = CsvTestCase::from_record(record, &headers);
+        let result = CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default());
         assert!(result.is_err());
         assert!(
             result
@@ -426,8 +489,45 @@ mod tests {
             "",
         ]);
 
-        let error = CsvTestCase::from_record(record, &headers).unwrap_err();
+        let error =
+            CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default()).unwrap_err();
         assert!(error.contains("Invalid agent_one_temp"));
+    }
+
+    #[test]
+    fn parses_runtime_policy_overrides() {
+        let mut headers = create_test_headers();
+        headers.extend([
+            "request_timeout_ms",
+            "max_retries",
+            "retry_backoff_ms",
+            "max_total_tokens",
+            "max_concurrent_requests",
+        ]);
+        let mut record = csv::StringRecord::from(vec![
+            "TicTacToe",
+            "OpenAI",
+            "model-one",
+            "",
+            "",
+            "",
+            "Ollama",
+            "model-two",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]);
+        record.extend(["5000", "4", "100", "2000", "1"]);
+
+        let test_case =
+            CsvTestCase::from_record(record, &headers, &AgentRuntimeConfig::default()).unwrap();
+        assert_eq!(test_case.runtime.request_timeout_ms, 5_000);
+        assert_eq!(test_case.runtime.max_retries, 4);
+        assert_eq!(test_case.runtime.retry_backoff_ms, 100);
+        assert_eq!(test_case.runtime.max_total_tokens, Some(2_000));
+        assert_eq!(test_case.runtime.max_concurrent_requests, 1);
     }
 
     #[test]
@@ -446,6 +546,7 @@ mod tests {
             agent_two_secret_profile: None,
             repetitions: 1,
             description: "Test".to_string(),
+            runtime: AgentRuntimeConfig::default(),
         };
 
         let configs = test_case.to_agent_configs();

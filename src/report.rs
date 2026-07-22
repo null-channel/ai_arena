@@ -40,6 +40,11 @@ pub struct AgentMetadata<'a> {
     pub temperature: f32,
     pub requested_seed: Option<u64>,
     pub effective_seed: Option<u64>,
+    pub request_timeout_ms: u64,
+    pub max_retries: u32,
+    pub retry_backoff_ms: u64,
+    pub max_total_tokens: Option<u64>,
+    pub max_concurrent_requests: u32,
 }
 
 impl<'a> MatchRecord<'a> {
@@ -67,6 +72,11 @@ impl<'a> MatchRecord<'a> {
                     AgentKind::OpenAI | AgentKind::Ollama => config.seed,
                     AgentKind::Anthropic => None,
                 },
+                request_timeout_ms: config.runtime.request_timeout_ms,
+                max_retries: config.runtime.max_retries,
+                retry_backoff_ms: config.runtime.retry_backoff_ms,
+                max_total_tokens: config.runtime.max_total_tokens,
+                max_concurrent_requests: config.runtime.max_concurrent_requests,
             })
             .collect();
 
@@ -177,6 +187,7 @@ mod tests {
                 seed: Some(10),
                 agent: AgentKind::Anthropic,
                 secret_profile: None,
+                runtime: Default::default(),
             },
             AIAgentConfig {
                 model: "gpt".into(),
@@ -184,6 +195,7 @@ mod tests {
                 seed: Some(20),
                 agent: AgentKind::OpenAI,
                 secret_profile: None,
+                runtime: Default::default(),
             },
         ];
         let result = TestResult::TicTacToe(TicTacToeResult {
