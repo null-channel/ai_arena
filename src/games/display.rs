@@ -60,6 +60,13 @@ fn print_game_summary(stats: &GameStats) {
         stats.average_turn_time_ms()
     );
     println!("❌ Invalid Moves: {}", stats.invalid_moves);
+    let usage = stats.token_usage();
+    if usage.total_tokens > 0 {
+        println!(
+            "🪙 Tokens: {} input + {} output = {} total",
+            usage.input_tokens, usage.output_tokens, usage.total_tokens
+        );
+    }
 }
 
 #[derive(Tabled)]

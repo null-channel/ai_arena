@@ -8,7 +8,7 @@ use async_openai::{
 };
 use serde_json::{Value, json};
 
-use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
+use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse, TokenUsage};
 
 pub struct OpenAIAgent {
     name: String,
@@ -93,6 +93,11 @@ impl OpenAIAgent {
             .await
             .map_err(|e| AgentError::Internal(format!("openai: {}", e)))?;
 
+        let token_usage = resp.usage.as_ref().map(|usage| TokenUsage {
+            input_tokens: usage.prompt_tokens as u64,
+            output_tokens: usage.completion_tokens as u64,
+            total_tokens: usage.total_tokens as u64,
+        });
         let content = resp
             .choices
             .first()
@@ -105,6 +110,7 @@ impl OpenAIAgent {
         Ok(MoveResponse {
             chosen_move,
             diagnostics: None,
+            token_usage,
         })
     }
 }

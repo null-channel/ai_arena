@@ -5,7 +5,18 @@ use clap::ValueEnum;
 use rig::prelude::*;
 use rig::providers::anthropic;
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug, serde::Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    Debug,
+    serde::Deserialize,
+    serde::Serialize,
+)]
 pub enum AgentKind {
     #[value(name = "OpenAI", alias = "open-ai", alias = "openai")]
     OpenAI,
@@ -15,7 +26,7 @@ pub enum AgentKind {
     Ollama,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, clap::Args)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Args)]
 pub struct AIAgentConfig {
     pub model: String,
     pub temp: f32,
@@ -40,6 +51,16 @@ impl AIAgentConfig {
         }
         Ok(())
     }
+
+    fn display_name(&self) -> String {
+        let seed = self
+            .seed
+            .map_or_else(|| "none".to_owned(), |seed| seed.to_string());
+        format!(
+            "{:?}:{} [temp={}, seed={seed}]",
+            self.agent, self.model, self.temp
+        )
+    }
 }
 
 pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<AIAgent>> {
@@ -48,13 +69,12 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<AIAgent>> {
 
     configs
         .into_iter()
-        .enumerate()
-        .map(|(i, cfg)| {
+        .map(|cfg| {
             cfg.validate()?;
             let secret_profile = cfg.secret_profile.as_deref();
+            let name = cfg.display_name();
             let agent = match cfg.agent {
                 AgentKind::OpenAI => {
-                    let name = format!("OpenAI_{}", i + 1);
                     let api_key = secrets_manager
                         .resolve_openai_key(secret_profile)
                         .map_err(|e| AgentError::InvalidRequest(e.to_string()))?;
@@ -67,7 +87,6 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<AIAgent>> {
                     )?)
                 }
                 AgentKind::Anthropic => {
-                    let name = format!("Anthropic_{}", i + 1);
                     let key = secrets_manager
                         .resolve_anthropic_key(secret_profile)
                         .map_err(|e| AgentError::InvalidRequest(e.to_string()))?;
@@ -80,7 +99,6 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> AgentResult<Vec<AIAgent>> {
                     AIAgent::Anthropic(AnthropicAgent::new(&name, agent)?)
                 }
                 AgentKind::Ollama => {
-                    let name = format!("Ollama_{}", i + 1);
                     let base_url = secrets_manager
                         .resolve_ollama_base_url(secret_profile)
                         .map_err(|e| AgentError::InvalidRequest(e.to_string()))?;
@@ -120,5 +138,9 @@ mod tests {
         assert!(config(-0.1, "model").validate().is_err());
         assert!(config(2.1, "model").validate().is_err());
         assert!(config(0.7, "  ").validate().is_err());
+        assert_eq!(
+            config(0.7, "model").display_name(),
+            "Ollama:model [temp=0.7, seed=42]"
+        );
     }
 }

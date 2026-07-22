@@ -4,7 +4,8 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::agent_config::{AIAgentConfig, AgentKind};
-use crate::games::{Game, TestResult, print_game_stats};
+use crate::games::{Game, print_game_stats};
+use crate::report::{JsonlWriter, MatchRecord, OutcomeSummary, agents_for_repetition};
 
 #[derive(Debug, Clone)]
 pub struct CsvTestCase {
@@ -157,7 +158,11 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String
     Ok(test_cases)
 }
 
-pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> {
+pub async fn run_csv_batch(
+    csv_path: &str,
+    verbose: bool,
+    mut output: Option<&mut JsonlWriter>,
+) -> Result<(), String> {
     let test_cases = read_csv_file(csv_path)?;
 
     println!("\n{}", "=".repeat(80));
@@ -167,6 +172,7 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
 
     let mut total_games = 0;
     let mut completed_games = 0;
+    let mut summary = OutcomeSummary::default();
 
     for (idx, test_case) in test_cases.iter().enumerate() {
         println!("\n[Test Case {} of {}]", idx + 1, test_cases.len());
@@ -197,22 +203,30 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
                 );
             }
 
-            let result = game.play_game(agents.clone()).await;
+            let match_agents = agents_for_repetition(&agents, rep + 1);
+            let result = game.play_game(match_agents.clone()).await;
             completed_games += 1;
+            summary.record(&result.stats().outcome);
             if verbose || test_case.repetitions == 1 {
                 print_game_stats(game.name(), &result);
             } else {
                 // Brief summary for multiple repetitions
-                let outcome = match &result {
-                    TestResult::TicTacToe(r) => &r.stats.outcome,
-                    TestResult::RockPaperScissors(r) => &r.stats.outcome,
-                    TestResult::ConnectFour(r) => &r.stats.outcome,
-                };
+                let outcome = &result.stats().outcome;
                 if let Some(winner) = outcome.winner() {
                     println!("  Result: Winner: {winner}");
                 } else {
                     println!("  Result: {outcome:?}");
                 }
+            }
+            if let Some(writer) = output.as_deref_mut() {
+                let record = MatchRecord::new(
+                    game.name(),
+                    rep + 1,
+                    test_case.repetitions,
+                    &match_agents,
+                    &result,
+                );
+                writer.write(&record)?;
             }
         }
     }
@@ -221,6 +235,7 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
     println!("BATCH RUN COMPLETE");
     println!("Total games: {}", total_games);
     println!("Completed: {}", completed_games);
+    summary.print();
     println!("{}", "=".repeat(80));
 
     Ok(())

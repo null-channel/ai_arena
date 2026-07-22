@@ -3,12 +3,14 @@ mod agent_config;
 mod agents;
 mod csv_runner;
 mod games;
+mod report;
 mod secrets;
 
 use agent_config::{AIAgentConfig, AgentKind};
 use clap::{ArgGroup, CommandFactory, Parser, error::ErrorKind};
 use csv_runner::run_csv_batch;
 use games::{Game, print_game_stats};
+use report::{JsonlWriter, MatchRecord, OutcomeSummary, agents_for_repetition};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -18,6 +20,9 @@ use games::{Game, print_game_stats};
 struct Args {
     #[arg(long, short = 'f')]
     test_file: Option<String>,
+    /// Write one machine-readable match record per line.
+    #[arg(long)]
+    output_jsonl: Option<String>,
     #[clap(flatten)]
     agent_config: ClapAgentConfig,
     #[arg(
@@ -95,9 +100,21 @@ fn clap_agents_to_real_agents(agents: ClapAgentConfig) -> Result<Vec<AIAgentConf
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    let mut output = match args
+        .output_jsonl
+        .as_deref()
+        .map(JsonlWriter::create)
+        .transpose()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("Error creating JSONL output: {error}");
+            std::process::exit(1);
+        }
+    };
     if let Some(test_file) = args.test_file {
         // Run CSV batch file
-        if let Err(e) = run_csv_batch(&test_file, true).await {
+        if let Err(e) = run_csv_batch(&test_file, true, output.as_mut()).await {
             eprintln!("Error running CSV batch: {}", e);
             std::process::exit(1);
         }
@@ -109,12 +126,31 @@ async fn main() {
         });
         let game = Game::try_from(game_name_arg.as_str()).expect("validated by clap");
         let game_name = game.name();
+        let mut summary = OutcomeSummary::default();
         for repetition in 1..=args.repetitions {
             if args.repetitions > 1 {
                 println!("\n--- Repetition {repetition} of {} ---", args.repetitions);
             }
-            let result = game.play_game(agents.clone()).await;
+            let match_agents = agents_for_repetition(&agents, repetition);
+            let result = game.play_game(match_agents.clone()).await;
+            summary.record(&result.stats().outcome);
             print_game_stats(game_name, &result);
+            if let Some(writer) = output.as_mut() {
+                let record = MatchRecord::new(
+                    game_name,
+                    repetition,
+                    args.repetitions,
+                    &match_agents,
+                    &result,
+                );
+                if let Err(error) = writer.write(&record) {
+                    eprintln!("Error writing JSONL output: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        if args.repetitions > 1 {
+            summary.print();
         }
     }
 }

@@ -4,7 +4,7 @@ use llm_connector::{
 };
 use serde_json::{Value, json};
 
-use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
+use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse, TokenUsage};
 
 pub struct OllamaAgent {
     name: String,
@@ -69,6 +69,11 @@ impl OllamaAgent {
             .map_err(|e| AgentError::Internal(format!("ollama chat request failed: {}", e)))?;
 
         // Extract content from response - llm-connector returns content as a String
+        let token_usage = response.usage.as_ref().map(|usage| TokenUsage {
+            input_tokens: usage.prompt_tokens as u64,
+            output_tokens: usage.completion_tokens as u64,
+            total_tokens: usage.total_tokens as u64,
+        });
         let content = response.content;
 
         // Parse the JSON response
@@ -79,6 +84,7 @@ impl OllamaAgent {
         Ok(MoveResponse {
             chosen_move,
             diagnostics: None,
+            token_usage,
         })
     }
 }

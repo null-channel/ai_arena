@@ -15,6 +15,15 @@ pub struct MoveRequest {
 pub struct MoveResponse {
     pub chosen_move: Value,
     pub diagnostics: Option<String>,
+    #[serde(default)]
+    pub token_usage: Option<TokenUsage>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
 }
 
 #[derive(Debug)]
@@ -129,6 +138,7 @@ impl GameAgent for ScriptedAgent {
         Ok(MoveResponse {
             chosen_move,
             diagnostics: Some("scripted test move".into()),
+            token_usage: None,
         })
     }
 }

@@ -121,11 +121,7 @@ impl TicTacToe {
                         self.state.game_over = true;
                         self.state.winner = Some(self.state.current_player);
                         self.stats.outcome = GameOutcome::Winner {
-                            winner: format!(
-                                "{} ({})",
-                                agent.name(),
-                                self.state.current_player.as_str()
-                            ),
+                            winner: agent.name().to_owned(),
                         };
                         break;
                     }
@@ -216,6 +212,7 @@ impl TicTacToe {
                     state_before: state_before.clone(),
                     state_after: state_before,
                     diagnostics: None,
+                    token_usage: None,
                 });
                 return Err(error);
             }
@@ -251,6 +248,7 @@ impl TicTacToe {
                     state_before: state_before.clone(),
                     state_after: state_before,
                     diagnostics: move_response.diagnostics,
+                    token_usage: move_response.token_usage,
                 });
                 return Err(error);
             }
@@ -284,6 +282,7 @@ impl TicTacToe {
             state_before,
             state_after,
             diagnostics: move_response.diagnostics,
+            token_usage: move_response.token_usage,
         };
 
         self.stats.add_turn(turn_stats);
@@ -616,7 +615,7 @@ mod tests {
             .play_game(vec![x, o])
             .await;
 
-        assert_eq!(result.stats.outcome.winner(), Some("x-agent (X)"));
+        assert_eq!(result.stats.outcome.winner(), Some("x-agent"));
         assert_eq!(result.stats.total_turns(), 5);
         assert_eq!(result.stats.invalid_moves, 0);
     }

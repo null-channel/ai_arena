@@ -39,6 +39,7 @@ impl AnthropicAgent {
         Ok(MoveResponse {
             chosen_move,
             diagnostics: None,
+            token_usage: None,
         })
     }
 }

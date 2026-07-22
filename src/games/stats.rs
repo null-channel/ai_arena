@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::agent::TokenUsage;
+
 /// Statistics tracked for each turn in a game
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnStats {
@@ -22,6 +24,8 @@ pub struct TurnStats {
     pub state_after: Value,
     /// Any diagnostics from the agent
     pub diagnostics: Option<String>,
+    /// Provider-reported token usage, when available.
+    pub token_usage: Option<TokenUsage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +96,18 @@ impl GameStats {
     pub fn total_turns(&self) -> u32 {
         self.turns.len() as u32
     }
+
+    pub fn token_usage(&self) -> TokenUsage {
+        self.turns.iter().filter_map(|turn| turn.token_usage).fold(
+            TokenUsage::default(),
+            |mut total, usage| {
+                total.input_tokens += usage.input_tokens;
+                total.output_tokens += usage.output_tokens;
+                total.total_tokens += usage.total_tokens;
+                total
+            },
+        )
+    }
 }
 
 impl Default for GameStats {
@@ -135,6 +151,7 @@ mod tests {
             state_before: json!({}),
             state_after: json!({}),
             diagnostics: None,
+            token_usage: None,
         };
 
         stats.add_turn(turn);
@@ -155,6 +172,7 @@ mod tests {
             state_before: json!({}),
             state_after: json!({}),
             diagnostics: None,
+            token_usage: None,
         };
 
         stats.add_turn(turn);
@@ -181,12 +199,25 @@ mod tests {
                 state_before: json!({}),
                 state_after: json!({}),
                 diagnostics: None,
+                token_usage: Some(TokenUsage {
+                    input_tokens: i as u64,
+                    output_tokens: (i * 2) as u64,
+                    total_tokens: (i * 3) as u64,
+                }),
             };
             stats.add_turn(turn);
         }
 
         assert_eq!(stats.turns.len(), 5);
         assert_eq!(stats.invalid_moves, 2); // Turns 1 and 3 are invalid
+        assert_eq!(
+            stats.token_usage(),
+            TokenUsage {
+                input_tokens: 10,
+                output_tokens: 20,
+                total_tokens: 30,
+            }
+        );
     }
 
     #[test]
@@ -208,6 +239,7 @@ mod tests {
             state_before: json!({}),
             state_after: json!({}),
             diagnostics: None,
+            token_usage: None,
         };
         stats.add_turn(turn);
         assert_eq!(stats.average_turn_time_ms(), 100.0);
@@ -227,6 +259,7 @@ mod tests {
                 state_before: json!({}),
                 state_after: json!({}),
                 diagnostics: None,
+                token_usage: None,
             };
             stats.add_turn(turn);
         }
@@ -250,6 +283,7 @@ mod tests {
                 state_before: json!({}),
                 state_after: json!({}),
                 diagnostics: None,
+                token_usage: None,
             };
             stats.add_turn(turn);
         }

@@ -16,23 +16,10 @@ pub enum Game {
     ConnectFour(ConnectFourConfig),
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
-pub enum PlayerOrder {
-    Random,
-    Decending,
-    Ascending,
-    #[default]
-    OrderInList,
-    ReverseOrderInList,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct TicTacToeConfig {
     pub board_size: u32,
     pub win_length: u32,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub order: PlayerOrder,
 }
 
 impl Default for TicTacToeConfig {
@@ -40,7 +27,6 @@ impl Default for TicTacToeConfig {
         TicTacToeConfig {
             board_size: 3,
             win_length: 3,
-            order: PlayerOrder::default(),
         }
     }
 }
@@ -48,17 +34,11 @@ impl Default for TicTacToeConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct RockPaperScissorsConfig {
     pub rounds: u32,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub order: PlayerOrder,
 }
 
 impl Default for RockPaperScissorsConfig {
     fn default() -> Self {
-        RockPaperScissorsConfig {
-            rounds: 3,
-            order: PlayerOrder::default(),
-        }
+        RockPaperScissorsConfig { rounds: 3 }
     }
 }
 
@@ -67,9 +47,6 @@ pub struct ConnectFourConfig {
     pub rows: u32,
     pub cols: u32,
     pub win_length: u32,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub order: PlayerOrder,
 }
 
 impl Default for ConnectFourConfig {
@@ -78,7 +55,6 @@ impl Default for ConnectFourConfig {
             rows: 6,
             cols: 7,
             win_length: 4,
-            order: PlayerOrder::default(),
         }
     }
 }
@@ -103,6 +79,16 @@ pub struct RockPaperScissorsResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectFourResult {
     pub stats: GameStats,
+}
+
+impl TestResult {
+    pub fn stats(&self) -> &GameStats {
+        match self {
+            Self::TicTacToe(result) => &result.stats,
+            Self::RockPaperScissors(result) => &result.stats,
+            Self::ConnectFour(result) => &result.stats,
+        }
+    }
 }
 
 impl TryFrom<&str> for Game {
@@ -279,18 +265,11 @@ mod tests {
     }
 
     #[test]
-    fn test_player_order_default() {
-        let order = PlayerOrder::default();
-        assert!(matches!(order, PlayerOrder::OrderInList));
-    }
-
-    #[test]
     fn rejects_invalid_game_dimensions() {
         assert!(
             Game::TicTacToe(TicTacToeConfig {
                 board_size: 0,
                 win_length: 0,
-                order: PlayerOrder::default(),
             })
             .validate()
             .is_err()
@@ -300,18 +279,14 @@ mod tests {
                 rows: 6,
                 cols: 7,
                 win_length: 8,
-                order: PlayerOrder::default(),
             })
             .validate()
             .is_err()
         );
         assert!(
-            Game::RockPaperScissors(RockPaperScissorsConfig {
-                rounds: 0,
-                order: PlayerOrder::default(),
-            })
-            .validate()
-            .is_err()
+            Game::RockPaperScissors(RockPaperScissorsConfig { rounds: 0 })
+                .validate()
+                .is_err()
         );
     }
 }

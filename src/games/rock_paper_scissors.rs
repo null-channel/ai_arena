@@ -152,13 +152,13 @@ impl RockPaperScissors {
             if self.state.player_one_score >= rounds_to_win {
                 self.state.game_over = true;
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 1)", player_one_agent.name()),
+                    winner: player_one_agent.name().to_owned(),
                 };
                 break;
             } else if self.state.player_two_score >= rounds_to_win {
                 self.state.game_over = true;
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 2)", player_two_agent.name()),
+                    winner: player_two_agent.name().to_owned(),
                 };
                 break;
             }
@@ -168,11 +168,11 @@ impl RockPaperScissors {
         if !self.state.game_over {
             if self.state.player_one_score > self.state.player_two_score {
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 1)", player_one_agent.name()),
+                    winner: player_one_agent.name().to_owned(),
                 };
             } else if self.state.player_two_score > self.state.player_one_score {
                 self.stats.outcome = GameOutcome::Winner {
-                    winner: format!("{} (Player 2)", player_two_agent.name()),
+                    winner: player_two_agent.name().to_owned(),
                 };
             } else {
                 self.stats.outcome = GameOutcome::Draw;
@@ -238,9 +238,9 @@ impl RockPaperScissors {
         let ((response_one, duration_one), (response_two, duration_two)) =
             tokio::join!(player_one_future, player_two_future);
 
-        let (move_one, diagnostics_one, choice_one, choice_one_error) =
+        let (move_one, diagnostics_one, usage_one, choice_one, choice_one_error) =
             self.evaluate_response(response_one, "Player 1");
-        let (move_two, diagnostics_two, choice_two, choice_two_error) =
+        let (move_two, diagnostics_two, usage_two, choice_two, choice_two_error) =
             self.evaluate_response(response_two, "Player 2");
         let choice_one_valid = choice_one_error.is_none();
         let choice_two_valid = choice_two_error.is_none();
@@ -269,6 +269,7 @@ impl RockPaperScissors {
             state_before: state_before.clone(),
             state_after: self.state_to_json(),
             diagnostics: diagnostics_one,
+            token_usage: usage_one,
         };
         self.stats.add_turn(turn_stats_one);
 
@@ -283,6 +284,7 @@ impl RockPaperScissors {
             state_before: state_before.clone(),
             state_after: self.state_to_json(),
             diagnostics: diagnostics_two,
+            token_usage: usage_two,
         };
         self.stats.add_turn(turn_stats_two);
 
@@ -310,7 +312,13 @@ impl RockPaperScissors {
         &self,
         response: AgentResult<MoveResponse>,
         player_name: &str,
-    ) -> (Value, Option<String>, Option<Choice>, Option<String>) {
+    ) -> (
+        Value,
+        Option<String>,
+        Option<crate::agent::TokenUsage>,
+        Option<Choice>,
+        Option<String>,
+    ) {
         match response {
             Ok(response) => {
                 let choice = self.parse_choice(&response.chosen_move, player_name);
@@ -318,18 +326,21 @@ impl RockPaperScissors {
                     Ok(Some(choice)) => (
                         response.chosen_move,
                         response.diagnostics,
+                        response.token_usage,
                         Some(choice),
                         None,
                     ),
                     Ok(None) => (
                         response.chosen_move,
                         response.diagnostics,
+                        response.token_usage,
                         None,
                         Some(format!("{player_name}: invalid choice")),
                     ),
                     Err(error) => (
                         response.chosen_move,
                         response.diagnostics,
+                        response.token_usage,
                         None,
                         Some(error),
                     ),
@@ -337,6 +348,7 @@ impl RockPaperScissors {
             }
             Err(error) => (
                 Value::Null,
+                None,
                 None,
                 None,
                 Some(format!("{player_name}: agent error: {error}")),
