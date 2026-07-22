@@ -1,6 +1,5 @@
-game_name,agent_one_kind,agent_one_model,agent_one_temp,agent_one_seed,agent_two_kind,agent_two_model,agent_two_temp,agent_two_seed,repetitions,description
-TicTacToe,OpenAI,gpt-4o-mini,0.7,42,OpenAI,gpt-4o-mini,0.7,43,1,OpenAI vs OpenAI TicTacToe
-RockPaperScissors,Ollama,llama3,0.7,100,Ollama,llama3,0.8,101,3,Best of 3 Rock Paper Scissors
-ConnectFour,Anthropic,claude-3-7-sonnet,0.7,200,OpenAI,gpt-4o-mini,0.7,201,1,Connect Four Championship
-TicTacToe,Ollama,llama3,0.5,300,OpenAI,gpt-4o-mini,0.9,301,2,TicTacToe with different temperatures
-
+game_name,agent_one_kind,agent_one_model,agent_one_temp,agent_one_seed,agent_one_secret_profile,agent_two_kind,agent_two_model,agent_two_temp,agent_two_seed,agent_two_secret_profile,repetitions,description,request_timeout_ms,max_retries,retry_backoff_ms,max_total_tokens,max_concurrent_requests
+TicTacToe,OpenAI,gpt-4o-mini,0.2,42,default,OpenAI,gpt-4o-mini,0.2,43,default,10,OpenAI seed comparison,60000,2,250,5000,2
+RockPaperScissors,Ollama,llama3.2,0.7,100,local,Ollama,llama3.2,0.7,101,local,10,Ollama seed comparison,30000,1,250,,2
+ConnectFour,Anthropic,claude-3-7-sonnet,0.2,200,default,OpenAI,gpt-4o-mini,0.2,201,default,4,Anthropic versus OpenAI,60000,2,250,,2
+TicTacToe,Ollama,llama3.2,0.5,300,local,OpenAI,gpt-4o-mini,0.5,301,default,6,Local versus hosted model,60000,2,250,,2

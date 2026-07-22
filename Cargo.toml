@@ -2,6 +2,13 @@
 name = "ai_arena"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.97.1"
+description = "A reproducible arena for evaluating language models through structured games"
+license = "Apache-2.0"
+repository = "https://github.com/null-channel/ai_arena"
+readme = "README.md"
+keywords = ["ai", "llm", "evaluation", "games", "benchmark"]
+categories = ["command-line-utilities", "development-tools::testing"]
 
 [dependencies]
 clap = { version = "4.5.47", features = ["derive"] }
