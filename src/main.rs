@@ -1,14 +1,14 @@
 mod agent;
-mod agents;
 mod agent_config;
-mod games;
+mod agents;
 mod csv_runner;
+mod games;
 mod secrets;
 
-use clap::Parser;
-use games::{Game, print_game_stats};
 use agent_config::{AIAgentConfig, AgentKind};
+use clap::Parser;
 use csv_runner::run_csv_batch;
+use games::{Game, print_game_stats};
 
 #[derive(Parser, Debug)]
 #[command(name = "ai_arena")]
@@ -28,7 +28,6 @@ struct ClapTestCase {
     #[arg(long, short)]
     repetitions: u32,
 }
-
 
 #[derive(Clone, Debug, serde::Deserialize, clap::Args)]
 pub struct ClapAgentConfig {
@@ -54,7 +53,7 @@ pub struct ClapAgentConfig {
     agent_two_secret_profile: Option<String>,
 }
 
-
+#[allow(dead_code)]
 fn clap_agents_to_real_agents(agents: ClapAgentConfig) -> Vec<AIAgentConfig> {
     vec![
         AIAgentConfig {
@@ -88,7 +87,7 @@ async fn main() {
         let game = case.game_name;
         let game_name = game.name();
         let result = game.play_game(case.agents.clone()).await;
-        
+
         // Print formatted statistics
         print_game_stats(game_name, &result);
     } else {
@@ -96,11 +95,7 @@ async fn main() {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct TestBatch {
-    cases: Vec<TestCase>,
-}
-
+#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Deserialize)]
 struct TestCase {
     game_name: Game,
@@ -116,11 +111,8 @@ impl From<ClapTestCase> for TestCase {
             // Need to make a new game here
             game_name: Game::from(config.game_name.as_str()),
             description: "manual run".to_string(),
-            agents: agents,
+            agents,
             repetitions: config.repetitions,
         }
     }
 }
-
-
-

@@ -27,7 +27,10 @@ pub struct AIAgentConfig {
 pub fn build_agents(configs: Vec<AIAgentConfig>) -> Vec<AIAgent> {
     // Load secrets manager (will be empty if file doesn't exist, falls back to env vars)
     let secrets_manager = SecretsManager::load().unwrap_or_else(|e| {
-        eprintln!("Warning: Could not load secrets file: {}. Falling back to environment variables.", e);
+        eprintln!(
+            "Warning: Could not load secrets file: {}. Falling back to environment variables.",
+            e
+        );
         SecretsManager::load_from_path(std::path::Path::new("/dev/null")).unwrap()
     });
 
@@ -42,7 +45,9 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> Vec<AIAgent> {
                     let api_key = secrets_manager
                         .resolve_openai_key(secret_profile)
                         .expect("Failed to resolve OpenAI API key");
-                    AIAgent::OpenAI(OpenAIAgent::new(&name, &cfg.model, &api_key).expect("create openai agent"))
+                    AIAgent::OpenAI(
+                        OpenAIAgent::new(&name, &cfg.model, &api_key).expect("create openai agent"),
+                    )
                 }
                 AgentKind::Anthropic => {
                     let name = format!("Anthropic_{}", i + 1);
@@ -55,7 +60,9 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> Vec<AIAgent> {
                         .preamble("Be precise and concise.")
                         .temperature(cfg.temp as f64)
                         .build();
-                    AIAgent::Anthropic(AnthropicAgent::new(&name, agent).expect("create anthropic agent"))
+                    AIAgent::Anthropic(
+                        AnthropicAgent::new(&name, agent).expect("create anthropic agent"),
+                    )
                 }
                 AgentKind::Ollama => {
                     let name = format!("Ollama_{}", i + 1);
@@ -71,4 +78,3 @@ pub fn build_agents(configs: Vec<AIAgentConfig>) -> Vec<AIAgent> {
         })
         .collect()
 }
-

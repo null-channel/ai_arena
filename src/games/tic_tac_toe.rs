@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Instant;
 
 use crate::agent::{AIAgent, MoveRequest, MoveResponse};
@@ -43,22 +43,12 @@ impl Player {
         }
     }
 
-    fn to_string(&self) -> String {
-        self.as_str().to_string()
-    }
-
     fn other(&self) -> Player {
         match self {
             Player::X => Player::O,
             Player::O => Player::X,
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TicTacToeMove {
-    pub row: u32,
-    pub col: u32,
 }
 
 pub struct TicTacToe {
@@ -72,7 +62,7 @@ impl TicTacToe {
     pub fn new(config: TicTacToeConfig) -> Self {
         let board_size = config.board_size as usize;
         let board = vec![vec![None; board_size]; board_size];
-        
+
         Self {
             config,
             state: TicTacToeState {
@@ -83,13 +73,13 @@ impl TicTacToe {
                 winner: None,
             },
             stats: GameStats::new(),
-            game_id: format!("ttt_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            game_id: format!("ttt_{}", &uuid::Uuid::new_v4().to_string()[..8]),
         }
     }
 
     pub async fn play_game(mut self, agents: Vec<AIAgent>) -> TicTacToeResult {
         let start_time = Instant::now();
-        
+
         // Ensure we have exactly 2 agents
         if agents.len() != 2 {
             return TicTacToeResult {
@@ -101,21 +91,21 @@ impl TicTacToe {
 
         let player_x_agent = &agents[0];
         let player_o_agent = &agents[1];
-        
-        // Map players to agents
-        let agent_map: Vec<(&AIAgent, Player)> = vec![
-            (player_x_agent, Player::X),
-            (player_o_agent, Player::O),
-        ];
 
-        while !self.state.game_over && self.state.turn_number < (self.config.board_size * self.config.board_size) {
+        // Map players to agents
+        let agent_map: Vec<(&AIAgent, Player)> =
+            vec![(player_x_agent, Player::X), (player_o_agent, Player::O)];
+
+        while !self.state.game_over
+            && self.state.turn_number < (self.config.board_size * self.config.board_size)
+        {
             let current_agent_idx = match self.state.current_player {
                 Player::X => 0,
                 Player::O => 1,
             };
-            
+
             let (agent, player) = &agent_map[current_agent_idx];
-            
+
             // Execute turn
             match self.execute_turn(agent, *player).await {
                 Ok(()) => {
@@ -123,17 +113,21 @@ impl TicTacToe {
                     if self.check_win() {
                         self.state.game_over = true;
                         self.state.winner = Some(self.state.current_player);
-                        self.stats.winner = Some(format!("{} ({})", agent.name(), self.state.current_player.as_str()));
+                        self.stats.winner = Some(format!(
+                            "{} ({})",
+                            agent.name(),
+                            self.state.current_player.as_str()
+                        ));
                         break;
                     }
-                    
+
                     // Check for draw
                     if self.state.turn_number >= (self.config.board_size * self.config.board_size) {
                         self.state.game_over = true;
                         self.stats.draw = true;
                         break;
                     }
-                    
+
                     // Switch player
                     self.state.current_player = self.state.current_player.other();
                 }
@@ -296,7 +290,10 @@ impl TicTacToe {
                 for i in 0..win_length {
                     let row = start_row + i;
                     let col = start_col + i;
-                    if row < board_size && col < board_size && self.state.board[row][col] == Some(player) {
+                    if row < board_size
+                        && col < board_size
+                        && self.state.board[row][col] == Some(player)
+                    {
                         count += 1;
                         if count >= win_length {
                             return true;
@@ -315,7 +312,10 @@ impl TicTacToe {
                 for i in 0..win_length {
                     let row = start_row + i;
                     let col = start_col.saturating_sub(i);
-                    if row < board_size && col < board_size && self.state.board[row][col] == Some(player) {
+                    if row < board_size
+                        && col < board_size
+                        && self.state.board[row][col] == Some(player)
+                    {
                         count += 1;
                         if count >= win_length {
                             return true;
@@ -337,17 +337,17 @@ impl TicTacToe {
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(|cell| cell.map(|p| p.to_string()))
+                    .map(|cell| cell.map(|p| p.as_str().to_owned()))
                     .collect()
             })
             .collect();
 
         json!({
             "board": board,
-            "current_player": self.state.current_player.to_string(),
+            "current_player": self.state.current_player.as_str(),
             "turn_number": self.state.turn_number,
             "game_over": self.state.game_over,
-            "winner": self.state.winner.map(|p| p.to_string()),
+            "winner": self.state.winner.map(|p| p.as_str().to_owned()),
             "board_size": self.config.board_size,
             "win_length": self.config.win_length,
         })
@@ -372,12 +372,6 @@ mod tests {
     }
 
     #[test]
-    fn test_player_to_string() {
-        assert_eq!(Player::X.to_string(), "X");
-        assert_eq!(Player::O.to_string(), "O");
-    }
-
-    #[test]
     fn test_player_other() {
         assert_eq!(Player::X.other(), Player::O);
         assert_eq!(Player::O.other(), Player::X);
@@ -387,12 +381,12 @@ mod tests {
     fn test_tic_tac_toe_new() {
         let config = TicTacToeConfig::default();
         let game = TicTacToe::new(config);
-        
+
         assert_eq!(game.state.board.len(), 3);
         assert_eq!(game.state.board[0].len(), 3);
         assert_eq!(game.state.current_player, Player::X);
         assert_eq!(game.state.turn_number, 0);
-        assert_eq!(game.state.game_over, false);
+        assert!(!game.state.game_over);
         assert_eq!(game.state.winner, None);
     }
 
@@ -403,7 +397,7 @@ mod tests {
             win_length: 4,
         };
         let game = TicTacToe::new(config);
-        
+
         assert_eq!(game.state.board.len(), 5);
         assert_eq!(game.state.board[0].len(), 5);
     }
@@ -412,7 +406,7 @@ mod tests {
     fn test_is_valid_move_empty_board() {
         let config = TicTacToeConfig::default();
         let game = TicTacToe::new(config);
-        
+
         assert!(game.is_valid_move(0, 0));
         assert!(game.is_valid_move(1, 1));
         assert!(game.is_valid_move(2, 2));
@@ -422,7 +416,7 @@ mod tests {
     fn test_is_valid_move_out_of_bounds() {
         let config = TicTacToeConfig::default();
         let game = TicTacToe::new(config);
-        
+
         assert!(!game.is_valid_move(3, 0));
         assert!(!game.is_valid_move(0, 3));
         assert!(!game.is_valid_move(10, 10));
@@ -432,10 +426,10 @@ mod tests {
     fn test_is_valid_move_occupied() {
         let config = TicTacToeConfig::default();
         let mut game = TicTacToe::new(config);
-        
+
         // Place a piece
         game.state.board[1][1] = Some(Player::X);
-        
+
         assert!(!game.is_valid_move(1, 1));
         assert!(game.is_valid_move(0, 0));
         assert!(game.is_valid_move(2, 2));
@@ -445,13 +439,13 @@ mod tests {
     fn test_check_win_horizontal() {
         let config = TicTacToeConfig::default();
         let mut game = TicTacToe::new(config);
-        
+
         // Create horizontal win for X
         game.state.board[0][0] = Some(Player::X);
         game.state.board[0][1] = Some(Player::X);
         game.state.board[0][2] = Some(Player::X);
         game.state.current_player = Player::X;
-        
+
         assert!(game.check_win());
     }
 
@@ -459,13 +453,13 @@ mod tests {
     fn test_check_win_vertical() {
         let config = TicTacToeConfig::default();
         let mut game = TicTacToe::new(config);
-        
+
         // Create vertical win for O
         game.state.board[0][1] = Some(Player::O);
         game.state.board[1][1] = Some(Player::O);
         game.state.board[2][1] = Some(Player::O);
         game.state.current_player = Player::O;
-        
+
         assert!(game.check_win());
     }
 
@@ -473,13 +467,13 @@ mod tests {
     fn test_check_win_diagonal_tl_br() {
         let config = TicTacToeConfig::default();
         let mut game = TicTacToe::new(config);
-        
+
         // Create diagonal win (top-left to bottom-right)
         game.state.board[0][0] = Some(Player::X);
         game.state.board[1][1] = Some(Player::X);
         game.state.board[2][2] = Some(Player::X);
         game.state.current_player = Player::X;
-        
+
         assert!(game.check_win());
     }
 
@@ -487,13 +481,13 @@ mod tests {
     fn test_check_win_diagonal_tr_bl() {
         let config = TicTacToeConfig::default();
         let mut game = TicTacToe::new(config);
-        
+
         // Create diagonal win (top-right to bottom-left)
         game.state.board[0][2] = Some(Player::O);
         game.state.board[1][1] = Some(Player::O);
         game.state.board[2][0] = Some(Player::O);
         game.state.current_player = Player::O;
-        
+
         assert!(game.check_win());
     }
 
@@ -501,13 +495,13 @@ mod tests {
     fn test_check_win_no_win() {
         let config = TicTacToeConfig::default();
         let mut game = TicTacToe::new(config);
-        
+
         // Partial game, no win
         game.state.board[0][0] = Some(Player::X);
         game.state.board[0][1] = Some(Player::O);
         game.state.board[1][1] = Some(Player::X);
         game.state.current_player = Player::X;
-        
+
         assert!(!game.check_win());
     }
 
@@ -518,14 +512,14 @@ mod tests {
             win_length: 4,
         };
         let mut game = TicTacToe::new(config);
-        
+
         // Create horizontal win of length 4
         game.state.board[2][0] = Some(Player::X);
         game.state.board[2][1] = Some(Player::X);
         game.state.board[2][2] = Some(Player::X);
         game.state.board[2][3] = Some(Player::X);
         game.state.current_player = Player::X;
-        
+
         assert!(game.check_win());
     }
 
@@ -535,7 +529,7 @@ mod tests {
         let mut game = TicTacToe::new(config);
         game.state.board[0][0] = Some(Player::X);
         game.state.turn_number = 1;
-        
+
         let json = game.state_to_json();
         assert_eq!(json["board"][0][0], "X");
         assert_eq!(json["turn_number"], 1);
@@ -550,4 +544,3 @@ mod tests {
         assert_eq!(config.win_length, 3);
     }
 }
-

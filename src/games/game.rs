@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_config::{AIAgentConfig, build_agents};
 
-use super::rock_paper_scissors::{RockPaperScissors, RockPaperScissorsConfig as GameRockPaperScissorsConfig};
-use super::tic_tac_toe::{TicTacToe, TicTacToeConfig as GameTicTacToeConfig};
 use super::connect_four::{ConnectFour, ConnectFourConfig as GameConnectFourConfig};
+use super::rock_paper_scissors::{
+    RockPaperScissors, RockPaperScissorsConfig as GameRockPaperScissorsConfig,
+};
 use super::stats::GameStats;
+use super::tic_tac_toe::{TicTacToe, TicTacToeConfig as GameTicTacToeConfig};
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum Game {
@@ -29,6 +31,7 @@ pub struct TicTacToeConfig {
     pub board_size: u32,
     pub win_length: u32,
     #[serde(default)]
+    #[allow(dead_code)]
     pub order: PlayerOrder,
 }
 
@@ -46,6 +49,7 @@ impl Default for TicTacToeConfig {
 pub struct RockPaperScissorsConfig {
     pub rounds: u32,
     #[serde(default)]
+    #[allow(dead_code)]
     pub order: PlayerOrder,
 }
 
@@ -64,6 +68,7 @@ pub struct ConnectFourConfig {
     pub cols: u32,
     pub win_length: u32,
     #[serde(default)]
+    #[allow(dead_code)]
     pub order: PlayerOrder,
 }
 
@@ -118,10 +123,13 @@ impl From<&str> for Game {
 }
 
 impl Game {
+    #[allow(dead_code)]
     pub fn new(name: &str) -> Option<Self> {
         match name {
             "TicTacToe" => Some(Game::TicTacToe(TicTacToeConfig::default())),
-            "RockPaperScissors" => Some(Game::RockPaperScissors(RockPaperScissorsConfig::default())),
+            "RockPaperScissors" => {
+                Some(Game::RockPaperScissors(RockPaperScissorsConfig::default()))
+            }
             "ConnectFour" => Some(Game::ConnectFour(ConnectFourConfig::default())),
             _ => None,
         }
@@ -145,7 +153,7 @@ impl Game {
                 };
                 let game = TicTacToe::new(game_config);
                 let result = game.play_game(agents).await;
-                
+
                 TestResult::TicTacToe(TicTacToeResult {
                     winner: result.winner.clone(),
                     stats: result.stats,
@@ -159,7 +167,7 @@ impl Game {
                 };
                 let game = RockPaperScissors::new(game_config);
                 let result = game.play_game(agents).await;
-                
+
                 TestResult::RockPaperScissors(RockPaperScissorsResult {
                     winner: result.winner.clone(),
                     stats: result.stats,
@@ -175,7 +183,7 @@ impl Game {
                 };
                 let game = ConnectFour::new(game_config);
                 let result = game.play_game(agents).await;
-                
+
                 TestResult::ConnectFour(ConnectFourResult {
                     winner: result.winner.clone(),
                     stats: result.stats,
@@ -193,7 +201,10 @@ mod tests {
     #[test]
     fn test_game_from_string() {
         assert!(matches!(Game::from("TicTacToe"), Game::TicTacToe(_)));
-        assert!(matches!(Game::from("RockPaperScissors"), Game::RockPaperScissors(_)));
+        assert!(matches!(
+            Game::from("RockPaperScissors"),
+            Game::RockPaperScissors(_)
+        ));
         assert!(matches!(Game::from("ConnectFour"), Game::ConnectFour(_)));
     }
 
@@ -206,9 +217,15 @@ mod tests {
     #[test]
     fn test_game_new() {
         assert!(matches!(Game::new("TicTacToe"), Some(Game::TicTacToe(_))));
-        assert!(matches!(Game::new("RockPaperScissors"), Some(Game::RockPaperScissors(_))));
-        assert!(matches!(Game::new("ConnectFour"), Some(Game::ConnectFour(_))));
-        assert_eq!(Game::new("InvalidGame"), None);
+        assert!(matches!(
+            Game::new("RockPaperScissors"),
+            Some(Game::RockPaperScissors(_))
+        ));
+        assert!(matches!(
+            Game::new("ConnectFour"),
+            Some(Game::ConnectFour(_))
+        ));
+        assert!(Game::new("InvalidGame").is_none());
     }
 
     #[test]
@@ -245,4 +262,3 @@ mod tests {
         assert!(matches!(order, PlayerOrder::OrderInList));
     }
 }
-

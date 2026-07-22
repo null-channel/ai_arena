@@ -38,7 +38,10 @@ impl CsvTestCase {
                 "OPENAI" => Ok(AgentKind::OpenAI),
                 "ANTHROPIC" => Ok(AgentKind::Anthropic),
                 "OLLAMA" => Ok(AgentKind::Ollama),
-                _ => Err(format!("Invalid agent kind: {}. Must be OpenAI, Anthropic, or Ollama", value)),
+                _ => Err(format!(
+                    "Invalid agent kind: {}. Must be OpenAI, Anthropic, or Ollama",
+                    value
+                )),
             }
         };
 
@@ -66,7 +69,8 @@ impl CsvTestCase {
                 .iter()
                 .position(|h| h.eq_ignore_ascii_case(name))
                 .and_then(|idx| {
-                    record.get(idx)
+                    record
+                        .get(idx)
                         .filter(|s| !s.is_empty())
                         .map(|s| s.to_string())
                 })
@@ -123,7 +127,8 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String
 
     let mut test_cases = Vec::new();
     for (row_num, result) in reader.records().enumerate() {
-        let record = result.map_err(|e| format!("Failed to read CSV row {}: {}", row_num + 2, e))?;
+        let record =
+            result.map_err(|e| format!("Failed to read CSV row {}: {}", row_num + 2, e))?;
         match CsvTestCase::from_record(record, &headers) {
             Ok(test_case) => test_cases.push(test_case),
             Err(e) => return Err(format!("Error parsing row {}: {}", row_num + 2, e)),
@@ -135,7 +140,7 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String
 
 pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> {
     let test_cases = read_csv_file(csv_path)?;
-    
+
     println!("\n{}", "=".repeat(80));
     println!("CSV BATCH RUN");
     println!("Found {} test case(s) in CSV file", test_cases.len());
@@ -151,39 +156,45 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
         }
         println!("Game: {}", test_case.game_name);
         println!("Repetitions: {}", test_case.repetitions);
-        println!("Agents: {} ({}) vs {} ({})", 
-            test_case.agent_one_model, 
-            format!("{:?}", test_case.agent_one_kind),
+        println!(
+            "Agents: {} ({:?}) vs {} ({:?})",
+            test_case.agent_one_model,
+            test_case.agent_one_kind,
             test_case.agent_two_model,
-            format!("{:?}", test_case.agent_two_kind));
+            test_case.agent_two_kind
+        );
 
         let game = Game::from(test_case.game_name.as_str());
         let agents = test_case.to_agent_configs();
 
         for rep in 0..test_case.repetitions {
             total_games += 1;
-            
+
             if test_case.repetitions > 1 {
-                println!("\n--- Repetition {} of {} ---", rep + 1, test_case.repetitions);
+                println!(
+                    "\n--- Repetition {} of {} ---",
+                    rep + 1,
+                    test_case.repetitions
+                );
             }
 
-            match game.play_game(agents.clone()).await {
-                result => {
-                    completed_games += 1;
-                    if verbose || test_case.repetitions == 1 {
-                        print_game_stats(game.name(), &result);
-                    } else {
-                        // Brief summary for multiple repetitions
-                        let winner = match &result {
-                            TestResult::TicTacToe(r) => r.winner.as_ref(),
-                            TestResult::RockPaperScissors(r) => r.winner.as_ref(),
-                            TestResult::ConnectFour(r) => r.winner.as_ref(),
-                        };
-                        println!("  Result: {}", 
-                            winner.map(|w| format!("Winner: {}", w))
-                                .unwrap_or_else(|| "Draw".to_string()));
-                    }
-                }
+            let result = game.play_game(agents.clone()).await;
+            completed_games += 1;
+            if verbose || test_case.repetitions == 1 {
+                print_game_stats(game.name(), &result);
+            } else {
+                // Brief summary for multiple repetitions
+                let winner = match &result {
+                    TestResult::TicTacToe(r) => r.winner.as_ref(),
+                    TestResult::RockPaperScissors(r) => r.winner.as_ref(),
+                    TestResult::ConnectFour(r) => r.winner.as_ref(),
+                };
+                println!(
+                    "  Result: {}",
+                    winner
+                        .map(|w| format!("Winner: {}", w))
+                        .unwrap_or_else(|| "Draw".to_string())
+                );
             }
         }
     }
@@ -241,7 +252,7 @@ mod tests {
         let result = CsvTestCase::from_record(record, &headers);
         assert!(result.is_ok());
         let test_case = result.unwrap();
-        
+
         assert_eq!(test_case.game_name, "TicTacToe");
         assert_eq!(test_case.agent_one_kind, AgentKind::OpenAI);
         assert_eq!(test_case.agent_one_model, "gpt-4o-mini");
@@ -277,18 +288,24 @@ mod tests {
         let result = CsvTestCase::from_record(record, &headers);
         assert!(result.is_ok());
         let test_case = result.unwrap();
-        
+
         assert_eq!(test_case.game_name, "ConnectFour");
         assert_eq!(test_case.agent_one_kind, AgentKind::Anthropic);
         assert_eq!(test_case.agent_one_model, "claude-3-7-sonnet");
         assert_eq!(test_case.agent_one_temp, 0.5);
         assert_eq!(test_case.agent_one_seed, 42);
-        assert_eq!(test_case.agent_one_secret_profile, Some("profile1".to_string()));
+        assert_eq!(
+            test_case.agent_one_secret_profile,
+            Some("profile1".to_string())
+        );
         assert_eq!(test_case.agent_two_kind, AgentKind::OpenAI);
         assert_eq!(test_case.agent_two_model, "gpt-4o-mini");
         assert_eq!(test_case.agent_two_temp, 0.9);
         assert_eq!(test_case.agent_two_seed, 43);
-        assert_eq!(test_case.agent_two_secret_profile, Some("profile2".to_string()));
+        assert_eq!(
+            test_case.agent_two_secret_profile,
+            Some("profile2".to_string())
+        );
         assert_eq!(test_case.repetitions, 3);
         assert_eq!(test_case.description, "Full test");
     }
@@ -373,13 +390,13 @@ mod tests {
 
         let configs = test_case.to_agent_configs();
         assert_eq!(configs.len(), 2);
-        
+
         assert_eq!(configs[0].model, "gpt-4o-mini");
         assert_eq!(configs[0].temp, 0.7);
         assert_eq!(configs[0].seed, Some(42));
         assert_eq!(configs[0].agent, AgentKind::OpenAI);
         assert_eq!(configs[0].secret_profile, Some("profile1".to_string()));
-        
+
         assert_eq!(configs[1].model, "llama3");
         assert_eq!(configs[1].temp, 0.8);
         assert_eq!(configs[1].seed, Some(43));
@@ -387,4 +404,3 @@ mod tests {
         assert_eq!(configs[1].secret_profile, None);
     }
 }
-

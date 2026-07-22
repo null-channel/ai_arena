@@ -1,8 +1,11 @@
-use tabled::{Table, Tabled, settings::{Style, Alignment, Modify, object::Rows}};
 use serde_json::Value;
+use tabled::{
+    Table, Tabled,
+    settings::{Alignment, Modify, Style, object::Rows},
+};
 
-use super::stats::GameStats;
 use super::game::TestResult;
+use super::stats::GameStats;
 
 /// Display game statistics in a formatted table
 pub fn print_game_stats(game_name: &str, result: &TestResult) {
@@ -34,7 +37,7 @@ pub fn print_game_stats(game_name: &str, result: &TestResult) {
 fn print_game_summary(stats: &GameStats, error: Option<&str>) {
     println!("\n📊 GAME SUMMARY");
     println!("{}", "-".repeat(80));
-    
+
     if let Some(err) = error {
         println!("❌ Error: {}", err);
         return;
@@ -46,9 +49,15 @@ fn print_game_summary(stats: &GameStats, error: Option<&str>) {
         None => println!("⚠️  Result: Incomplete"),
     }
 
-    println!("⏱️  Total Duration: {:.2}s", stats.total_duration_ms as f64 / 1000.0);
+    println!(
+        "⏱️  Total Duration: {:.2}s",
+        stats.total_duration_ms as f64 / 1000.0
+    );
     println!("🔄 Total Turns: {}", stats.total_turns());
-    println!("⚡ Average Turn Time: {:.2}ms", stats.average_turn_time_ms());
+    println!(
+        "⚡ Average Turn Time: {:.2}ms",
+        stats.average_turn_time_ms()
+    );
     println!("❌ Invalid Moves: {}", stats.invalid_moves);
 }
 
@@ -76,18 +85,26 @@ fn print_turn_table(stats: &GameStats) {
     println!("\n📋 TURN-BY-TURN STATISTICS");
     println!("{}", "-".repeat(80));
 
-    let rows: Vec<TurnRow> = stats.turns.iter().map(|turn| {
-        TurnRow {
+    let rows: Vec<TurnRow> = stats
+        .turns
+        .iter()
+        .map(|turn| TurnRow {
             turn: turn.turn_number.to_string(),
             player: turn.player.clone(),
             move_str: format_move(&turn.move_made),
             time: turn.time_taken_ms.to_string(),
-            valid: if turn.move_valid { "✓".to_string() } else { "✗".to_string() },
-            error: turn.error_message.as_ref()
+            valid: if turn.move_valid {
+                "✓".to_string()
+            } else {
+                "✗".to_string()
+            },
+            error: turn
+                .error_message
+                .as_ref()
                 .map(|e| e.chars().take(30).collect::<String>())
                 .unwrap_or_else(|| "-".to_string()),
-        }
-    }).collect();
+        })
+        .collect();
 
     let mut table = Table::new(rows);
     table
@@ -110,14 +127,16 @@ fn print_player_summary(stats: &GameStats) {
     let mut player_stats: HashMap<String, PlayerStats> = HashMap::new();
 
     for turn in &stats.turns {
-        let player_stat = player_stats.entry(turn.player.clone()).or_insert_with(|| PlayerStats {
-            name: turn.player.clone(),
-            total_turns: 0,
-            valid_moves: 0,
-            invalid_moves: 0,
-            total_time_ms: 0,
-            avg_time_ms: 0.0,
-        });
+        let player_stat = player_stats
+            .entry(turn.player.clone())
+            .or_insert_with(|| PlayerStats {
+                name: turn.player.clone(),
+                total_turns: 0,
+                valid_moves: 0,
+                invalid_moves: 0,
+                total_time_ms: 0,
+                avg_time_ms: 0.0,
+            });
 
         player_stat.total_turns += 1;
         if turn.move_valid {
@@ -152,16 +171,17 @@ fn print_player_summary(stats: &GameStats) {
         avg_time: String,
     }
 
-    let mut player_rows: Vec<PlayerRow> = player_stats.values().map(|stat| {
-        PlayerRow {
+    let mut player_rows: Vec<PlayerRow> = player_stats
+        .values()
+        .map(|stat| PlayerRow {
             name: stat.name.clone(),
             total_turns: stat.total_turns.to_string(),
             valid_moves: stat.valid_moves.to_string(),
             invalid_moves: stat.invalid_moves.to_string(),
             total_time: stat.total_time_ms.to_string(),
             avg_time: format!("{:.2}", stat.avg_time_ms),
-        }
-    }).collect();
+        })
+        .collect();
 
     // Sort by player name for consistency
     player_rows.sort_by_key(|r| r.name.clone());
@@ -186,7 +206,8 @@ struct PlayerStats {
 fn format_move(move_value: &Value) -> String {
     // Try to format the move nicely
     if let Some(obj) = move_value.as_object() {
-        let parts: Vec<String> = obj.iter()
+        let parts: Vec<String> = obj
+            .iter()
             .map(|(k, v)| {
                 let val_str = match v {
                     Value::String(s) => s.clone(),
@@ -201,4 +222,3 @@ fn format_move(move_value: &Value) -> String {
         format!("{}", move_value)
     }
 }
-

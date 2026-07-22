@@ -1,3 +1,3 @@
 pub mod anthropic;
-pub mod openai;
 pub mod ollama;
+pub mod openai;

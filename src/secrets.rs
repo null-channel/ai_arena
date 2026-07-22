@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct SecretsManager {
     secrets: SecretsConfig,
-    config_path: PathBuf,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -15,7 +14,7 @@ struct SecretsConfig {
     secrets: SecretsSection,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 struct SecretsSection {
     #[serde(default)]
     openai: HashMap<String, OpenAISecret>,
@@ -23,16 +22,6 @@ struct SecretsSection {
     anthropic: HashMap<String, AnthropicSecret>,
     #[serde(default)]
     ollama: HashMap<String, OllamaSecret>,
-}
-
-impl Default for SecretsSection {
-    fn default() -> Self {
-        Self {
-            openai: HashMap::new(),
-            anthropic: HashMap::new(),
-            ollama: HashMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -52,9 +41,7 @@ pub struct OllamaSecret {
 
 #[derive(Debug)]
 pub enum SecretsError {
-    FileNotFound(String),
     InvalidFormat(String),
-    PermissionError(String),
     SecretNotFound(String),
     IoError(String),
 }
@@ -62,9 +49,7 @@ pub enum SecretsError {
 impl std::fmt::Display for SecretsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SecretsError::FileNotFound(path) => write!(f, "Secrets file not found: {}", path),
             SecretsError::InvalidFormat(msg) => write!(f, "Invalid secrets file format: {}", msg),
-            SecretsError::PermissionError(msg) => write!(f, "Permission error: {}", msg),
             SecretsError::SecretNotFound(msg) => write!(f, "Secret not found: {}", msg),
             SecretsError::IoError(msg) => write!(f, "IO error: {}", msg),
         }
@@ -77,7 +62,9 @@ impl SecretsManager {
     /// Get the default secrets file path following XDG standards
     pub fn default_config_path() -> PathBuf {
         if let Ok(config_dir) = std::env::var("XDG_CONFIG_HOME") {
-            PathBuf::from(config_dir).join("ai_arena").join("secrets.toml")
+            PathBuf::from(config_dir)
+                .join("ai_arena")
+                .join("secrets.toml")
         } else if let Some(home) = dirs::home_dir() {
             home.join(".config").join("ai_arena").join("secrets.toml")
         } else {
@@ -103,7 +90,6 @@ impl SecretsManager {
                         ollama: HashMap::new(),
                     },
                 },
-                config_path: path.to_path_buf(),
             });
         }
 
@@ -112,10 +98,13 @@ impl SecretsManager {
             .map_err(|e| SecretsError::IoError(format!("Failed to read metadata: {}", e)))?;
         let permissions = metadata.permissions();
         let mode = permissions.mode();
-        
+
         // Check if file is readable by others (permission bits 004, 005, 006, 007)
         if (mode & 0o007) != 0 {
-            eprintln!("⚠️  Warning: Secrets file is readable by others. Consider running: chmod 600 {}", path.display());
+            eprintln!(
+                "⚠️  Warning: Secrets file is readable by others. Consider running: chmod 600 {}",
+                path.display()
+            );
         }
 
         // Read and parse the file
@@ -125,46 +114,37 @@ impl SecretsManager {
         let secrets: SecretsConfig = toml::from_str(&contents)
             .map_err(|e| SecretsError::InvalidFormat(format!("Failed to parse TOML: {}", e)))?;
 
-        Ok(Self {
-            secrets,
-            config_path: path.to_path_buf(),
-        })
+        Ok(Self { secrets })
     }
 
     /// Get OpenAI secret by profile name
     pub fn get_openai(&self, profile: &str) -> Result<&OpenAISecret, SecretsError> {
-        self.secrets
-            .secrets
-            .openai
-            .get(profile)
-            .ok_or_else(|| SecretsError::SecretNotFound(format!("OpenAI profile '{}' not found", profile)))
+        self.secrets.secrets.openai.get(profile).ok_or_else(|| {
+            SecretsError::SecretNotFound(format!("OpenAI profile '{}' not found", profile))
+        })
     }
 
     /// Get Anthropic secret by profile name
     pub fn get_anthropic(&self, profile: &str) -> Result<&AnthropicSecret, SecretsError> {
-        self.secrets
-            .secrets
-            .anthropic
-            .get(profile)
-            .ok_or_else(|| SecretsError::SecretNotFound(format!("Anthropic profile '{}' not found", profile)))
+        self.secrets.secrets.anthropic.get(profile).ok_or_else(|| {
+            SecretsError::SecretNotFound(format!("Anthropic profile '{}' not found", profile))
+        })
     }
 
     /// Get Ollama secret by profile name
     pub fn get_ollama(&self, profile: &str) -> Result<&OllamaSecret, SecretsError> {
-        self.secrets
-            .secrets
-            .ollama
-            .get(profile)
-            .ok_or_else(|| SecretsError::SecretNotFound(format!("Ollama profile '{}' not found", profile)))
+        self.secrets.secrets.ollama.get(profile).ok_or_else(|| {
+            SecretsError::SecretNotFound(format!("Ollama profile '{}' not found", profile))
+        })
     }
 
     /// Resolve OpenAI API key with fallback to environment variable
     pub fn resolve_openai_key(&self, profile: Option<&str>) -> Result<String, SecretsError> {
         // Try secret profile first
-        if let Some(profile_name) = profile {
-            if let Ok(secret) = self.get_openai(profile_name) {
-                return Ok(secret.api_key.clone());
-            }
+        if let Some(profile_name) = profile
+            && let Ok(secret) = self.get_openai(profile_name)
+        {
+            return Ok(secret.api_key.clone());
         }
 
         // Fallback to environment variable
@@ -185,10 +165,10 @@ impl SecretsManager {
     /// Resolve Anthropic API key with fallback to environment variable
     pub fn resolve_anthropic_key(&self, profile: Option<&str>) -> Result<String, SecretsError> {
         // Try secret profile first
-        if let Some(profile_name) = profile {
-            if let Ok(secret) = self.get_anthropic(profile_name) {
-                return Ok(secret.api_key.clone());
-            }
+        if let Some(profile_name) = profile
+            && let Ok(secret) = self.get_anthropic(profile_name)
+        {
+            return Ok(secret.api_key.clone());
         }
 
         // Fallback to environment variable
@@ -209,10 +189,10 @@ impl SecretsManager {
     /// Resolve Ollama base URL with fallback to environment variable
     pub fn resolve_ollama_base_url(&self, profile: Option<&str>) -> Result<String, SecretsError> {
         // Try secret profile first
-        if let Some(profile_name) = profile {
-            if let Ok(secret) = self.get_ollama(profile_name) {
-                return Ok(secret.base_url.clone());
-            }
+        if let Some(profile_name) = profile
+            && let Ok(secret) = self.get_ollama(profile_name)
+        {
+            return Ok(secret.base_url.clone());
         }
 
         // Fallback to environment variable
@@ -228,10 +208,4 @@ impl SecretsManager {
         // Default fallback
         Ok("http://localhost:11434".to_string())
     }
-
-    /// Get the config path
-    pub fn config_path(&self) -> &Path {
-        &self.config_path
-    }
 }
-
