@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Instant;
 
-use crate::agent::{AIAgent, MoveRequest, MoveResponse};
+use crate::agent::{GameAgent, MoveRequest, MoveResponse};
 use crate::games::stats::{GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,7 +77,7 @@ impl TicTacToe {
         }
     }
 
-    pub async fn play_game(mut self, agents: Vec<AIAgent>) -> TicTacToeResult {
+    pub async fn play_game<A: GameAgent>(mut self, agents: Vec<A>) -> TicTacToeResult {
         let start_time = Instant::now();
 
         // Ensure we have exactly 2 agents
@@ -93,7 +93,7 @@ impl TicTacToe {
         let player_o_agent = &agents[1];
 
         // Map players to agents
-        let agent_map: Vec<(&AIAgent, Player)> =
+        let agent_map: Vec<(&A, Player)> =
             vec![(player_x_agent, Player::X), (player_o_agent, Player::O)];
 
         while !self.state.game_over
@@ -104,10 +104,10 @@ impl TicTacToe {
                 Player::O => 1,
             };
 
-            let (agent, player) = &agent_map[current_agent_idx];
+            let &(agent, player) = &agent_map[current_agent_idx];
 
             // Execute turn
-            match self.execute_turn(agent, *player).await {
+            match self.execute_turn(agent, player).await {
                 Ok(()) => {
                     // Check for win condition
                     if self.check_win() {
@@ -148,7 +148,11 @@ impl TicTacToe {
         }
     }
 
-    async fn execute_turn(&mut self, agent: &AIAgent, player: Player) -> Result<(), String> {
+    async fn execute_turn<A: GameAgent>(
+        &mut self,
+        agent: &A,
+        player: Player,
+    ) -> Result<(), String> {
         let turn_start = Instant::now();
         self.state.turn_number += 1;
 
@@ -364,6 +368,7 @@ pub struct TicTacToeResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::ScriptedAgent;
 
     #[test]
     fn test_player_as_str() {
@@ -542,5 +547,29 @@ mod tests {
         let config = TicTacToeConfig::default();
         assert_eq!(config.board_size, 3);
         assert_eq!(config.win_length, 3);
+    }
+
+    #[tokio::test]
+    async fn plays_a_complete_game_with_scripted_agents() {
+        let x = ScriptedAgent::new(
+            "x-agent",
+            vec![
+                json!({"row": 0, "col": 0}),
+                json!({"row": 0, "col": 1}),
+                json!({"row": 0, "col": 2}),
+            ],
+        );
+        let o = ScriptedAgent::new(
+            "o-agent",
+            vec![json!({"row": 1, "col": 0}), json!({"row": 1, "col": 1})],
+        );
+
+        let result = TicTacToe::new(TicTacToeConfig::default())
+            .play_game(vec![x, o])
+            .await;
+
+        assert_eq!(result.winner.as_deref(), Some("x-agent (X)"));
+        assert_eq!(result.stats.total_turns(), 5);
+        assert!(result.error.is_none());
     }
 }

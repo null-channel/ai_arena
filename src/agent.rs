@@ -64,14 +64,22 @@ mod tests {
 
 pub type AgentResult<T> = Result<T, AgentError>;
 
+#[async_trait::async_trait]
+pub trait GameAgent: Send + Sync {
+    fn name(&self) -> &str;
+
+    async fn execute_turn(&self, request: &MoveRequest) -> AgentResult<MoveResponse>;
+}
+
 pub enum AIAgent {
     OpenAI(OpenAIAgent),
     Anthropic(AnthropicAgent),
     Ollama(OllamaAgent),
 }
 
-impl AIAgent {
-    pub fn name(&self) -> &str {
+#[async_trait::async_trait]
+impl GameAgent for AIAgent {
+    fn name(&self) -> &str {
         match self {
             AIAgent::OpenAI(agent) => agent.name(),
             AIAgent::Anthropic(agent) => agent.name(),
@@ -79,11 +87,48 @@ impl AIAgent {
         }
     }
 
-    pub async fn execute_turn(&self, request: &MoveRequest) -> AgentResult<MoveResponse> {
+    async fn execute_turn(&self, request: &MoveRequest) -> AgentResult<MoveResponse> {
         match self {
             AIAgent::OpenAI(agent) => agent.execute_turn(request).await,
             AIAgent::Anthropic(agent) => agent.execute_turn(request).await,
             AIAgent::Ollama(agent) => agent.execute_turn(request).await,
         }
+    }
+}
+
+#[cfg(test)]
+pub struct ScriptedAgent {
+    name: String,
+    moves: std::sync::Mutex<std::collections::VecDeque<Value>>,
+}
+
+#[cfg(test)]
+impl ScriptedAgent {
+    pub fn new(name: &str, moves: Vec<Value>) -> Self {
+        Self {
+            name: name.to_owned(),
+            moves: std::sync::Mutex::new(moves.into()),
+        }
+    }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl GameAgent for ScriptedAgent {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn execute_turn(&self, _request: &MoveRequest) -> AgentResult<MoveResponse> {
+        let chosen_move = self
+            .moves
+            .lock()
+            .map_err(|_| AgentError::Internal("scripted agent lock poisoned".into()))?
+            .pop_front()
+            .ok_or_else(|| AgentError::InvalidResponse("scripted agent has no move".into()))?;
+        Ok(MoveResponse {
+            chosen_move,
+            diagnostics: Some("scripted test move".into()),
+        })
     }
 }
