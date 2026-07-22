@@ -1,16 +1,8 @@
-mod agent;
-mod agent_config;
-mod agents;
-mod csv_runner;
-mod games;
-mod report;
-mod secrets;
-
-use agent_config::{AIAgentConfig, AgentKind, AgentRuntimeConfig};
+use ai_arena::agent_config::{AIAgentConfig, AgentKind, AgentRuntimeConfig};
+use ai_arena::csv_runner::run_csv_batch;
+use ai_arena::games::{Game, print_game_stats};
+use ai_arena::report::{JsonlWriter, MatchRecord, OutcomeSummary, agents_for_repetition};
 use clap::{ArgGroup, CommandFactory, Parser, error::ErrorKind};
-use csv_runner::run_csv_batch;
-use games::{Game, print_game_stats};
-use report::{JsonlWriter, MatchRecord, OutcomeSummary, agents_for_repetition};
 
 #[derive(Parser, Debug)]
 #[command(

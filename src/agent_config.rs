@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::agent::{AIAgent, AgentError, AgentResult, ManagedAgent};
+use crate::agent::{AIAgent, AgentError, AgentResult};
+use crate::agent_runtime::ManagedAgent;
 use crate::agents::{anthropic::AnthropicAgent, ollama::OllamaAgent, openai::OpenAIAgent};
 use crate::secrets::SecretsManager;
 use clap::ValueEnum;
