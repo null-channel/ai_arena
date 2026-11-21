@@ -2,9 +2,12 @@ use llm_connector::{
     LlmClient,
     types::{ChatRequest, Message, Role},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
+use crate::{
+    agent::{AgentError, AgentResult, MoveRequest, MoveResponse},
+    agents::prompt,
+};
 
 pub struct OllamaAgent {
     name: String,
@@ -12,6 +15,7 @@ pub struct OllamaAgent {
     base_url: String,
     temperature: f32,
     client: LlmClient,
+    custom_prompt: Option<String>,
 }
 
 impl OllamaAgent {
@@ -24,8 +28,10 @@ impl OllamaAgent {
         model: impl Into<String>,
         base_url: impl Into<String>,
         temperature: f32,
+        custom_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
         let base_url = base_url.into();
+        println!("base_url: {}", base_url);
         let client = LlmClient::ollama_with_base_url(&base_url)
             .map_err(|e| AgentError::Internal(format!("failed to create Ollama client: {}", e)))?;
 
@@ -35,19 +41,13 @@ impl OllamaAgent {
             base_url,
             temperature,
             client,
+            custom_prompt,
         })
     }
 
     pub async fn execute_turn(&self, request: &MoveRequest) -> AgentResult<MoveResponse> {
-        let system = "You are a game-playing AI. Respond ONLY with strict JSON matching the expected schema. Do not include any text outside JSON.";
-        let user = json!({
-            "turn_index": request.turn_index,
-            "game_id": request.game_id,
-            "state": request.state,
-            "expected_move_schema": request.expected_move_schema,
-        })
-        .to_string();
-
+        let system = prompt::system_prompt(request, self.custom_prompt.as_deref());
+        let user = prompt::user_prompt(request);
         let messages = vec![
             Message::text(Role::System, system),
             Message::text(Role::User, &user),
@@ -89,7 +89,7 @@ mod tests {
     fn test_ollama_agent_creation() {
         // Test that we can create an OllamaAgent with valid parameters
         // Note: This will fail if Ollama server is not running, but tests the API
-        let result = OllamaAgent::new("test_agent", "llama3", "http://localhost:11434", 0.7);
+        let result = OllamaAgent::new("test_agent", "llama3", "http://localhost:11434", 0.7, None);
 
         // If Ollama is running, this should succeed
         // If not, we at least verify the API is correct
@@ -111,7 +111,9 @@ mod tests {
     #[test]
     fn test_ollama_agent_name() {
         // Test name method (doesn't require Ollama to be running)
-        if let Ok(agent) = OllamaAgent::new("test_name", "llama3", "http://localhost:11434", 0.7) {
+        if let Ok(agent) =
+            OllamaAgent::new("test_name", "llama3", "http://localhost:11434", 0.7, None)
+        {
             assert_eq!(agent.name(), "test_name");
         }
     }

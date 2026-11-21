@@ -4,6 +4,8 @@ use std::path::Path;
 
 use crate::agent_config::{AIAgentConfig, AgentKind};
 use crate::games::{Game, TestResult, print_game_stats};
+use crate::storage::{RunMetadata, RunStore};
+use futures_util::FutureExt;
 
 #[derive(Debug, Clone)]
 pub struct CsvTestCase {
@@ -12,12 +14,16 @@ pub struct CsvTestCase {
     pub agent_one_model: String,
     pub agent_one_temp: f32,
     pub agent_one_seed: u64,
+    pub agent_one_api_endpoint: Option<String>,
     pub agent_one_secret_profile: Option<String>,
+    pub agent_one_prompt_file: Option<String>,
     pub agent_two_kind: AgentKind,
     pub agent_two_model: String,
     pub agent_two_temp: f32,
     pub agent_two_seed: u64,
     pub agent_two_secret_profile: Option<String>,
+    pub agent_two_api_endpoint: Option<String>,
+    pub agent_two_prompt_file: Option<String>,
     pub repetitions: u32,
     pub description: String,
 }
@@ -37,8 +43,12 @@ impl CsvTestCase {
             match value.to_uppercase().as_str() {
                 "OPENAI" => Ok(AgentKind::OpenAI),
                 "ANTHROPIC" => Ok(AgentKind::Anthropic),
+                "GEMINI" => Ok(AgentKind::Gemini),
                 "OLLAMA" => Ok(AgentKind::Ollama),
-                _ => Err(format!("Invalid agent kind: {}. Must be OpenAI, Anthropic, or Ollama", value)),
+                _ => Err(format!(
+                    "Invalid agent kind: {}. Must be OpenAI, Anthropic, Gemini, or Ollama",
+                    value
+                )),
             }
         };
 
@@ -66,7 +76,8 @@ impl CsvTestCase {
                 .iter()
                 .position(|h| h.eq_ignore_ascii_case(name))
                 .and_then(|idx| {
-                    record.get(idx)
+                    record
+                        .get(idx)
                         .filter(|s| !s.is_empty())
                         .map(|s| s.to_string())
                 })
@@ -79,11 +90,15 @@ impl CsvTestCase {
             agent_one_temp: parse_f32("agent_one_temp").unwrap_or(0.7),
             agent_one_seed: parse_u64("agent_one_seed").unwrap_or(0),
             agent_one_secret_profile: get_optional_field("agent_one_secret_profile"),
+            agent_one_api_endpoint: get_optional_field("agent_one_api_endpoint"),
+            agent_one_prompt_file: get_optional_field("agent_one_prompt_file"),
             agent_two_kind: parse_agent_kind("agent_two_kind")?,
             agent_two_model: get_field("agent_two_model")?,
             agent_two_temp: parse_f32("agent_two_temp").unwrap_or(0.7),
             agent_two_seed: parse_u64("agent_two_seed").unwrap_or(0),
             agent_two_secret_profile: get_optional_field("agent_two_secret_profile"),
+            agent_two_api_endpoint: get_optional_field("agent_two_api_endpoint"),
+            agent_two_prompt_file: get_optional_field("agent_two_prompt_file"),
             repetitions: parse_u32("repetitions").unwrap_or(1),
             description: get_field("description").unwrap_or_else(|_| "".to_string()),
         })
@@ -97,6 +112,8 @@ impl CsvTestCase {
                 seed: Some(self.agent_one_seed),
                 agent: self.agent_one_kind,
                 secret_profile: self.agent_one_secret_profile.clone(),
+                api_endpoint: self.agent_one_api_endpoint.clone(),
+                prompt_file: self.agent_one_prompt_file.clone(),
             },
             AIAgentConfig {
                 model: self.agent_two_model.clone(),
@@ -104,6 +121,8 @@ impl CsvTestCase {
                 seed: Some(self.agent_two_seed),
                 agent: self.agent_two_kind,
                 secret_profile: self.agent_two_secret_profile.clone(),
+                api_endpoint: self.agent_two_api_endpoint.clone(),
+                prompt_file: self.agent_two_prompt_file.clone(),
             },
         ]
     }
@@ -123,7 +142,8 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String
 
     let mut test_cases = Vec::new();
     for (row_num, result) in reader.records().enumerate() {
-        let record = result.map_err(|e| format!("Failed to read CSV row {}: {}", row_num + 2, e))?;
+        let record =
+            result.map_err(|e| format!("Failed to read CSV row {}: {}", row_num + 2, e))?;
         match CsvTestCase::from_record(record, &headers) {
             Ok(test_case) => test_cases.push(test_case),
             Err(e) => return Err(format!("Error parsing row {}: {}", row_num + 2, e)),
@@ -133,9 +153,15 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P) -> Result<Vec<CsvTestCase>, String
     Ok(test_cases)
 }
 
-pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> {
+pub async fn run_csv_batch<P: AsRef<Path>>(
+    csv_path: &str,
+    verbose: bool,
+    db_path: P,
+) -> Result<(), String> {
     let test_cases = read_csv_file(csv_path)?;
-    
+    let store = RunStore::new(db_path.as_ref().to_path_buf());
+    store.initialize().await?;
+
     println!("\n{}", "=".repeat(80));
     println!("CSV BATCH RUN");
     println!("Found {} test case(s) in CSV file", test_cases.len());
@@ -151,24 +177,48 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
         }
         println!("Game: {}", test_case.game_name);
         println!("Repetitions: {}", test_case.repetitions);
-        println!("Agents: {} ({}) vs {} ({})", 
-            test_case.agent_one_model, 
+        println!(
+            "Agents: {} ({}) vs {} ({})",
+            test_case.agent_one_model,
             format!("{:?}", test_case.agent_one_kind),
             test_case.agent_two_model,
-            format!("{:?}", test_case.agent_two_kind));
+            format!("{:?}", test_case.agent_two_kind)
+        );
 
         let game = Game::from(test_case.game_name.as_str());
         let agents = test_case.to_agent_configs();
 
         for rep in 0..test_case.repetitions {
             total_games += 1;
-            
-            if test_case.repetitions > 1 {
-                println!("\n--- Repetition {} of {} ---", rep + 1, test_case.repetitions);
-            }
 
-            match game.play_game(agents.clone()).await {
-                result => {
+            if test_case.repetitions > 1 {
+                println!(
+                    "\n--- Repetition {} of {} ---",
+                    rep + 1,
+                    test_case.repetitions
+                );
+            }
+            let run_id = store
+                .create_run(
+                    &game,
+                    &agents,
+                    Some(RunMetadata {
+                        source: Some("csv".to_string()),
+                        description: (!test_case.description.is_empty())
+                            .then(|| test_case.description.clone()),
+                        repetition: Some(rep + 1),
+                        matrix_job_id: None,
+                    }),
+                )
+                .await?;
+            store.mark_running(&run_id).await?;
+
+            let result = std::panic::AssertUnwindSafe(game.play_game(agents.clone(), None, None))
+                .catch_unwind()
+                .await;
+            match result {
+                Ok(result) => {
+                    store.complete_run(&run_id, &result).await?;
                     completed_games += 1;
                     if verbose || test_case.repetitions == 1 {
                         print_game_stats(game.name(), &result);
@@ -178,11 +228,24 @@ pub async fn run_csv_batch(csv_path: &str, verbose: bool) -> Result<(), String> 
                             TestResult::TicTacToe(r) => r.winner.as_ref(),
                             TestResult::RockPaperScissors(r) => r.winner.as_ref(),
                             TestResult::ConnectFour(r) => r.winner.as_ref(),
+                            TestResult::Chess(r) => r.winner.as_ref(),
+                            TestResult::Checkers(r) => r.winner.as_ref(),
+                            TestResult::Battleship(r) => r.winner.as_ref(),
                         };
-                        println!("  Result: {}", 
-                            winner.map(|w| format!("Winner: {}", w))
-                                .unwrap_or_else(|| "Draw".to_string()));
+                        println!(
+                            "  Result: {}",
+                            winner
+                                .map(|w| format!("Winner: {}", w))
+                                .unwrap_or_else(|| "Draw".to_string())
+                        );
                     }
+                }
+                Err(_) => {
+                    store.mark_error(&run_id, "game execution panicked").await?;
+                    return Err(format!(
+                        "Game execution panicked; run {} marked as error",
+                        run_id
+                    ));
                 }
             }
         }
@@ -241,7 +304,7 @@ mod tests {
         let result = CsvTestCase::from_record(record, &headers);
         assert!(result.is_ok());
         let test_case = result.unwrap();
-        
+
         assert_eq!(test_case.game_name, "TicTacToe");
         assert_eq!(test_case.agent_one_kind, AgentKind::OpenAI);
         assert_eq!(test_case.agent_one_model, "gpt-4o-mini");
@@ -277,18 +340,24 @@ mod tests {
         let result = CsvTestCase::from_record(record, &headers);
         assert!(result.is_ok());
         let test_case = result.unwrap();
-        
+
         assert_eq!(test_case.game_name, "ConnectFour");
         assert_eq!(test_case.agent_one_kind, AgentKind::Anthropic);
         assert_eq!(test_case.agent_one_model, "claude-3-7-sonnet");
         assert_eq!(test_case.agent_one_temp, 0.5);
         assert_eq!(test_case.agent_one_seed, 42);
-        assert_eq!(test_case.agent_one_secret_profile, Some("profile1".to_string()));
+        assert_eq!(
+            test_case.agent_one_secret_profile,
+            Some("profile1".to_string())
+        );
         assert_eq!(test_case.agent_two_kind, AgentKind::OpenAI);
         assert_eq!(test_case.agent_two_model, "gpt-4o-mini");
         assert_eq!(test_case.agent_two_temp, 0.9);
         assert_eq!(test_case.agent_two_seed, 43);
-        assert_eq!(test_case.agent_two_secret_profile, Some("profile2".to_string()));
+        assert_eq!(
+            test_case.agent_two_secret_profile,
+            Some("profile2".to_string())
+        );
         assert_eq!(test_case.repetitions, 3);
         assert_eq!(test_case.description, "Full test");
     }
@@ -362,24 +431,29 @@ mod tests {
             agent_one_temp: 0.7,
             agent_one_seed: 42,
             agent_one_secret_profile: Some("profile1".to_string()),
+            agent_one_api_endpoint: Some("https://something.com".to_string()),
+            agent_one_prompt_file: None,
+
             agent_two_kind: AgentKind::Ollama,
             agent_two_model: "llama3".to_string(),
             agent_two_temp: 0.8,
             agent_two_seed: 43,
             agent_two_secret_profile: None,
+            agent_two_api_endpoint: None,
+            agent_two_prompt_file: None,
             repetitions: 1,
             description: "Test".to_string(),
         };
 
         let configs = test_case.to_agent_configs();
         assert_eq!(configs.len(), 2);
-        
+
         assert_eq!(configs[0].model, "gpt-4o-mini");
         assert_eq!(configs[0].temp, 0.7);
         assert_eq!(configs[0].seed, Some(42));
         assert_eq!(configs[0].agent, AgentKind::OpenAI);
         assert_eq!(configs[0].secret_profile, Some("profile1".to_string()));
-        
+
         assert_eq!(configs[1].model, "llama3");
         assert_eq!(configs[1].temp, 0.8);
         assert_eq!(configs[1].seed, Some(43));
@@ -387,4 +461,3 @@ mod tests {
         assert_eq!(configs[1].secret_profile, None);
     }
 }
-

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::agents::{anthropic::AnthropicAgent, ollama::OllamaAgent, openai::OpenAIAgent};
+use crate::agents::{
+    anthropic::AnthropicAgent, gemini::GeminiAgent, ollama::OllamaAgent, openai::OpenAIAgent,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MoveRequest {
@@ -9,6 +11,7 @@ pub struct MoveRequest {
     pub game_id: String,
     pub state: Value,
     pub expected_move_schema: Value,
+    pub instructions: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -65,6 +68,7 @@ pub type AgentResult<T> = Result<T, AgentError>;
 pub enum AIAgent {
     OpenAI(OpenAIAgent),
     Anthropic(AnthropicAgent),
+    Gemini(GeminiAgent),
     Ollama(OllamaAgent),
 }
 
@@ -73,6 +77,7 @@ impl AIAgent {
         match self {
             AIAgent::OpenAI(agent) => agent.name(),
             AIAgent::Anthropic(agent) => agent.name(),
+            AIAgent::Gemini(agent) => agent.name(),
             AIAgent::Ollama(agent) => agent.name(),
         }
     }
@@ -81,6 +86,7 @@ impl AIAgent {
         match self {
             AIAgent::OpenAI(agent) => agent.execute_turn(request).await,
             AIAgent::Anthropic(agent) => agent.execute_turn(request).await,
+            AIAgent::Gemini(agent) => agent.execute_turn(request).await,
             AIAgent::Ollama(agent) => agent.execute_turn(request).await,
         }
     }

@@ -2,54 +2,53 @@
 
 ## Overview
 
-This plan aligns `TODOS.md` with the current codebase and sequences work from **server mode polish** through **observability**, **persistence/replay**, **matrix + parallelism**, and **new games**. It incorporates accepted product decisions:
+This plan aligns `TODOS.md` with the current codebase and sequences the remaining work: **observation**, **replay**, **matrix + parallelism**, and **new games**. It incorporates accepted product decisions:
 
 | Decision | Choice |
 |----------|--------|
-| UI direction | **Hybrid**: keep React/Vite for now; design server routes and APIs so an HTMX server-rendered UI can be added later without rewriting the engine |
-| First milestone | **Server mode foundation** (host/port, static serving, API tests) |
-| Persistence | **Research-backed recommendation below** (SQLite primary; DuckDB optional analytics layer) |
+| UI direction | **HTMX-first**: server-rendered UI from Rust/Axum; no npm/Vite/React dependency for the product UI |
+| Completed foundation | Server mode, HTMX product UI, and DuckDB run history |
+| Persistence | **DuckDB run history** for CLI, CSV, and web sessions |
 
 **Source of truth for backlog:** `TODOS.md`  
 **Related existing plans:** `plans/secret-configuration-separation.md`, `plans/ollama-agent-support.md`
 
 ---
 
-## Current State (May 2026)
+## Current State (July 2026)
 
 ### Implemented
 
 - **CLI** (`src/main.rs`): `run`, `batch`, `serve`, `secrets` subcommands
-- **Games**: TicTacToe, RockPaperScissors, ConnectFour, Chess (`src/games/`)
+- **Games**: TicTacToe, RockPaperScissors, ConnectFour, Chess, Checkers, Battleship (`src/games/`)
 - **Agents**: OpenAI, Anthropic, Gemini, Ollama; shared move contract (`MoveRequest` / `MoveResponse`)
 - **Stats**: Per-turn `GameStats` with CLI table output (`src/games/display.rs`)
 - **Batch**: Sequential CSV runner (`src/csv_runner.rs`)
-- **Server**: Axum REST + WebSocket, in-memory sessions on fixed `127.0.0.1:3000` (`src/server/mod.rs`)
-- **Web**: React 19 + Vite + Tailwind observer (`web/src/`) — separate dev server, not served by Rust
+- **Server**: Axum REST + WebSocket, configurable bind address, optional static serving (`src/server/mod.rs`)
+- **Web**: HTMX product UI at `/` can start games, list sessions, and observe a game's readable board/status through polling. The React/Vite prototype in `web/` is legacy only.
 - **Secrets**: TOML profiles + optional encryption (`src/secrets.rs`)
-- **Tests**: 77 Rust unit tests passing (`cargo test`); frontend `npm run build` succeeds
+- **Tests**: Rust unit/integration tests passing (`cargo test`)
 
 ### Gaps vs `TODOS.md`
 
 | TODO item | Status |
 |-----------|--------|
-| Server binds to chosen host/port | Partial — hardcoded `127.0.0.1:3000` |
-| Web UI at root (HTMX) | Not started — React prototype exists instead |
-| Connect Four | Done in engine; listed again in TODO is redundant |
-| Checkers, Battleship | Not started |
+| Server binds to chosen host/port | Done — `serve --host` / `--port` |
+| Web UI at root (HTMX) | Done — create games, list sessions, and observe status |
+| Checkers | Done — forced captures, chained jumps, and king promotion |
+| Battleship | Done — hidden opponent fleet state and shot validation |
 | Game matrix (hundreds of sims) | Not started |
 | Parallel game execution | Not started |
-| Observe any game (CLI + web, many parallel) | Partial — WS for single game only |
+| Observe any game (CLI + web, many parallel) | Partial — single-game web observation exists; CLI `run --watch` and matrix click-through remain |
 | Replay | Not started |
-| Persist games (DB) | Not started |
+| Persist games (DB) | Done — DuckDB run history for CLI, CSV, and web |
 | Optional: per-AI prompts, leaderboard on disk | Partial — `prompt.rs` exists; no leaderboard |
 
 ### Doc / stack drift
 
-- `README.md`: subcommand CLI examples outdated; Chess/Gemini/serve/secrets underdocumented
-- `TODOS.md` specifies HTMX; repo has React — **hybrid plan** bridges this
-- CSV parser omits Gemini; web POST omits `secret_profile`, `api_endpoint`, `seed`
-- `tower-http` `fs` in `Cargo.toml` unused; no integrated production UI bundle
+- `web/` React/Vite prototype exists but is no longer the target UI path
+- HTMX routes, templates, and route tests are first-class Axum features
+- The browser UI works directly from the Rust binary without an npm build step
 
 ---
 
@@ -59,97 +58,79 @@ This plan aligns `TODOS.md` with the current codebase and sequences work from **
 flowchart TB
   subgraph clients [Clients]
     CLI[CLI run / batch / replay]
-    React[React observer - phase 1]
-    HTMX[HTMX pages - phase 2]
+    HTMX[HTMX pages + fragments]
   end
 
   subgraph core [Rust core]
-    API[Axum HTTP + WS]
+    UI[Axum HTML routes]
+    API[Axum JSON + WS/SSE]
     Runner[Game runner + matrix scheduler]
-    Store[Storage trait]
-    SQLite[(SQLite)]
-    Duck[(DuckDB - optional)]
+    Store[DuckDB run store]
+    Duck[(DuckDB)]
   end
 
   CLI --> Runner
-  React --> API
-  HTMX --> API
+  HTMX --> UI
+  UI --> API
   API --> Runner
   Runner --> Store
-  Store --> SQLite
-  Store -. analytics export .-> Duck
+  Store --> Duck
 ```
 
 **Principles**
 
-1. **One game event contract** — replace ad hoc `serde_json::Value` observer payloads with a typed `GameEvent` (turn, state snapshot, error, complete) used by CLI, WS, HTMX partials, and persistence.
-2. **Server owns sessions** — in-memory active runs; durable history in SQLite.
-3. **UI-agnostic API** — REST + WS (+ later SSE or HTMX-friendly HTML fragments) so React and HTMX can coexist.
+1. **One game event contract** — replace ad hoc `serde_json::Value` observer payloads with a typed `GameEvent` (turn, state snapshot, error, complete) used by CLI, HTMX fragments/streams, and persistence.
+2. **Server owns sessions** — in-memory active runs; durable history in DuckDB.
+3. **HTMX product UI** — HTML routes and fragments are first-class; JSON/WS/SSE endpoints exist only where they simplify streaming, testing, or external use.
 
 ---
 
 ## Database Recommendation
 
-### Recommendation: **SQLite as system of record**
+### Decision: **DuckDB as run-history store**
 
-| Criterion | SQLite | DuckDB | Postgres |
-|-----------|--------|--------|----------|
-| Local/single-user CLI + server | Excellent | Good | Overkill |
-| Turn-by-turn append + replay | Excellent (JSON columns + indexed runs) | Good | Excellent |
-| Zero extra services | Yes | Yes (embedded) | No |
-| Hundreds–thousands of matrix runs on one machine | Good with WAL + batch inserts | Excellent for analytics queries | Good if hosted |
-| Multi-tenant remote deployment | Weak | Weak | Strong |
+DuckDB is now the selected local system of record for game runs. It keeps the project service-free while making later aggregate/statistical queries over many matches straightforward.
 
-**Why not DuckDB first?** DuckDB shines at analytical scans (win rates by model, move latency percentiles). AI Arena’s first persistence needs are **transactional writes per turn**, **replay by game id**, and **simple listing** — SQLite is the standard fit and keeps ops trivial.
-
-**Why not Postgres first?** No multi-user hosting requirement yet. Adding Postgres later behind the same `Storage` trait is straightforward if deployment grows.
-
-### Optional phase: DuckDB analytics
-
-- Periodic or on-demand **export/sync** from SQLite → DuckDB (or attach DuckDB and `INSERT SELECT` aggregates).
-- Use DuckDB for matrix dashboards: ELO-style summaries, invalid-move rates, provider latency — not for live game loops.
-
-### Schema sketch (SQLite)
+### Implemented schema shape (DuckDB)
 
 ```sql
 -- runs: one logical match (may be one row in a matrix job)
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,
-  matrix_job_id TEXT,
   game_type TEXT NOT NULL,
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  started_at TEXT,
   finished_at TEXT,
   winner TEXT,
-  config_json TEXT NOT NULL
+  draw BOOLEAN NOT NULL DEFAULT false,
+  error TEXT,
+  total_turns BIGINT,
+  invalid_moves BIGINT,
+  total_duration_ms BIGINT,
+  agents_json TEXT NOT NULL,
+  game_config_json TEXT NOT NULL,
+  result_json TEXT,
+  metadata_json TEXT
 );
 
-CREATE TABLE run_agents (
+CREATE TABLE run_turns (
   run_id TEXT NOT NULL,
-  slot INTEGER NOT NULL,
-  kind TEXT NOT NULL,
-  model TEXT NOT NULL,
-  temp REAL,
-  seed INTEGER,
-  secret_profile TEXT,
-  PRIMARY KEY (run_id, slot)
+  seq BIGINT NOT NULL,
+  turn_number BIGINT NOT NULL,
+  player TEXT NOT NULL,
+  move_json TEXT NOT NULL,
+  valid BOOLEAN NOT NULL,
+  error TEXT,
+  time_taken_ms BIGINT NOT NULL,
+  state_before_json TEXT NOT NULL,
+  state_after_json TEXT NOT NULL,
+  diagnostics TEXT,
+  PRIMARY KEY (run_id, seq)
 );
-
-CREATE TABLE run_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id TEXT NOT NULL,
-  seq INTEGER NOT NULL,
-  event_type TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE (run_id, seq)
-);
-
-CREATE INDEX idx_run_events_run ON run_events(run_id);
-CREATE INDEX idx_runs_matrix ON runs(matrix_job_id);
 ```
 
-**Crates:** `sqlx` (async, migrations) or `rusqlite` + `tokio::task::spawn_blocking` for simpler integration.
+**Crate:** `duckdb` with bundled DuckDB, called behind a small blocking boundary.
 
 ---
 
@@ -159,132 +140,147 @@ CREATE INDEX idx_runs_matrix ON runs(matrix_job_id);
 
 **Goal:** Reduce confusion before feature work.
 
-- [ ] Update `README.md` to document subcommands, all games, Gemini, `serve`, secrets
-- [ ] Reconcile `TODOS.md` (mark Connect Four done; note hybrid UI)
-- [ ] Add Gemini to `csv_runner` agent kind parsing
-- [ ] Fix web `POST /api/games` body to send `secret_profile`, `api_endpoint`, `seed`, `temp`
-- [ ] Wire or remove orphan `src/secrets_test.rs`
-- [ ] Address high-signal warnings (`secrets_manager.set` Result in `main.rs`)
+- [x] Update `README.md` to document subcommands, all games, Gemini, `serve`, secrets
+- [x] Reconcile `TODOS.md` (mark Connect Four done; note HTMX direction)
+- [x] Add Gemini to `csv_runner` agent kind parsing
+- [x] Fix existing prototype `POST /api/games` body to send `secret_profile`, `api_endpoint`, `seed`, `temp`
+- [x] Wire or remove orphan `src/secrets_test.rs`
+- [x] Address high-signal warnings (`secrets_manager.set` Result in `main.rs`)
 
-**Exit:** Docs match code; CSV and web configs consistent with `AIAgentConfig`.
+**Exit:** Docs match code; CSV and request configs consistent with `AIAgentConfig`.
 
 ---
 
 ### Phase 1 — Server mode foundation (Milestone 1 — priority)
 
-**Goal:** Production-shaped `serve` suitable for tests and future HTMX/React static hosting.
+**Goal:** Production-shaped `serve` suitable for tests and HTMX routes.
 
 **CLI**
 
 ```bash
-ai_arena serve --host 0.0.0.0 --port 3000 --static-dir web/dist
+ai_arena serve --host 0.0.0.0 --port 3000
 ```
 
 **Tasks**
 
-- [ ] Add `--host`, `--port` (defaults: `127.0.0.1`, `3000`) to `Serve` subcommand
-- [ ] Bind `TcpListener` to configured address; log effective URL
-- [ ] Serve `GET /` from `--static-dir` when set (`tower_http::services::ServeDir` + `index.html` fallback for SPA)
-- [ ] `GET /api/games` — list in-memory sessions (id, game type, status) for UI matrix later
-- [ ] Standardize error responses (JSON `{ "error": "..." }` already partial)
-- [ ] **Tests:** integration tests using `axum::test` or `reqwest` against spawned server:
+- [x] Add `--host`, `--port` (defaults: `127.0.0.1`, `3000`) to `Serve` subcommand
+- [x] Bind `TcpListener` to configured address; log effective URL
+- [x] Serve static assets from `--static-dir` when set (`tower_http::services::ServeDir` + `index.html` fallback for legacy/prototype assets)
+- [x] `GET /api/games` — list in-memory sessions (id, game type, status) for UI matrix later
+- [x] Standardize error responses (JSON `{ "error": "..." }` already partial)
+- [x] **Tests:** integration tests using `axum::test` or `reqwest` against spawned server:
   - health returns 200
   - server listens on chosen port (ephemeral port in test)
   - create game returns `game_id`; invalid game type returns 400
   - static route serves `index.html` when dir provided
 
-**Exit:** `cargo test` includes server tests; `ai_arena serve` configurable; optional static bundle at `/`.
+**Exit:** `cargo test` includes server tests; `ai_arena serve` configurable; ready for HTMX routes at `/`.
 
 ---
 
-### Phase 2 — Typed events + single-game observation
+### Phase 2 — HTMX UI foundation
 
-**Goal:** Reliable live view for one game in CLI and web (TODOS: observe any game).
+**Goal:** The Rust server renders the product UI at `/`; no npm build step required.
 
 **Tasks**
 
-- [ ] Define `GameEvent` enum in `src/games/events.rs` (or `server/events.rs`)
-- [ ] Emit events from each game engine instead of raw state JSON only
-- [ ] WS: send typed events; keep backward-compatible fields during transition
-- [ ] CLI `run --watch` (optional flag): print board/state each turn to stderr or alt screen
-- [ ] React: map `GameEvent` to `GameBoard` / `GameLog` (reduce `any`)
-- [ ] Chess: minimal board or consistent FEN + last move in events
+- [x] Add server-side HTML rendering with base layout and HTMX script import
+- [x] `GET /` — render game start page with game selector, two agent forms, and existing secret profiles
+- [x] `POST /games/start` — validate form input, create a game session, and return a game panel fragment
+- [x] `GET /games` or root run list fragment — show in-memory sessions (id, game type, status)
+- [x] `GET /games/{id}` — render a game observation page
+- [x] `GET /games/{id}/fragment` — render current status/board/log fragment for polling
+- [x] Keep JSON routes available for tests and future integrations, but do not build product UI in React/Vite
+- [x] Add route tests for root page, start form validation, and session list fragment
+
+**Exit:** `ai_arena serve` opens an HTMX page at `/` that can create a game and show its status without `npm run build`.
+
+---
+
+### Phase 3 — Typed events + CLI observation
+
+**Goal:** Establish one typed event contract and add CLI live observation. The web already offers polling-based observation for a single game; matrix click-through is Phase 5.
+
+**Status:** Complete (July 2026).
+
+**Tasks**
+
+- [x] Define `GameEvent` enum in `src/games/events.rs`
+- [x] Emit typed turn, completion, and error events from each game engine
+- [x] Refactor the existing HTMX polling fragments to consume typed events
+- [x] CLI `run --watch`: print board/state each turn to stderr
+- [x] HTMX: map turn events to the human-readable board/status fragment
+- [x] Chess: include FEN and the last move in state events
 
 **Exit:** One CLI game and one web game show the same turn sequence; no silent stuck loops without timeout (document per-game invalid-move policy).
 
 ---
 
-### Phase 3 — SQLite persistence + replay
+### Phase 4 — Replay from DuckDB history
 
-**Goal:** Store every match; replay from disk (TODOS: replay + store games).
+**Goal:** Build replay on the existing DuckDB run and turn history (TODOS: replay).
+
+**Status:** Complete (July 2026).
 
 **Tasks**
 
-- [ ] `trait GameStorage { create_run, append_event, finish_run, get_run, list_events }`
-- [ ] SQLite implementation + migrations (`migrations/001_init.sql`)
-- [ ] Persist on server WS path and optionally CLI `run` / `batch`
-- [ ] `GET /api/runs/{id}` and `GET /api/runs/{id}/events`
-- [ ] CLI: `ai_arena replay <run_id>` — stdout or TUI stepping
-- [ ] Web: replay page (React first; HTMX can use same JSON endpoints)
+- [x] `trait GameStorage { create_run, append_event, finish_run, get_run, list_events }`
+- [x] DuckDB implementation for CLI `run`, CSV `batch`, and server game sessions
+- [x] Add migration/version tracking for the DuckDB schema
+- [x] `GET /api/runs/{id}` and `GET /api/runs/{id}/events`
+- [x] CLI: `ai_arena replay <run_id>` — stdout turn-by-turn replay
+- [x] Web: server-rendered replay page backed by stored turns
 
 **Exit:** Completed game recoverable after server restart (at least for runs finished while server was up); replay reproduces turn sequence.
 
 ---
 
-### Phase 4 — Matrix runner + parallelism
+### Phase 5 — Matrix runner + parallelism
 
 **Goal:** Run hundreds of simulations with live progress (TODOS: matrix UI, parallel games).
 
+**Status:** Complete (July 2026).
+
 **Tasks**
 
-- [ ] `MatrixJob` model: game type, agent grid or CSV-like rows, repetitions, concurrency limit
-- [ ] `POST /api/matrix` — start job; `GET /api/matrix/{id}` — progress (queued/running/done/failed counts)
-- [ ] Worker pool (`tokio::spawn` + `Semaphore`) — cap concurrency (configurable, default e.g. 4–8)
-- [ ] Each child run gets `run_id`; events persisted under `matrix_job_id`
-- [ ] React: matrix builder + results table updating via polling or WS
-- [ ] HTMX (phase 4b): server-rendered matrix form + partial updates for progress rows
+- [x] `MatrixJob` model: game type, two-agent matchup, repetitions, concurrency limit
+- [x] `POST /api/matrix` — start job; `GET /api/matrix/{id}` — progress (queued/running/done/failed counts)
+- [x] Worker pool (`tokio::spawn` + `Semaphore`) — configurable cap, default 4, maximum 32
+- [x] Each child run gets `run_id`; the run records its `matrix_job_id` and persisted turn history
+- [x] HTMX matrix builder form
+- [x] HTMX results table updating through polling
+- [x] Each row links to live observation or replay for that run
 
 **Exit:** 100+ game job completes with bounded parallelism; UI shows per-run status; click-through opens live observer or replay.
 
 ---
 
-### Phase 5 — HTMX UI (hybrid path)
+### Phase 6 — Checkers and Battleship
 
-**Goal:** Satisfy `TODOS.md` without deleting React immediately.
+**Goal:** Add the two remaining planned games.
 
-**Tasks**
-
-- [ ] Add `templates/` (or `web-htmx/`) with base layout, game form, run list
-- [ ] Routes: `GET /` (HTMX shell), `POST /games/start`, `GET /games/{id}/fragment` (board partial)
-- [ ] Use same APIs and `GameEvent` stream (SSE or WS + `hx-ext`)
-- [ ] Document: React for rich dev UX; HTMX for single-binary deploy
-
-**Exit:** `ai_arena serve --static-dir` can serve either built React or HTMX-first root; feature parity for start + watch one game.
-
----
-
-### Phase 6 — New games
-
-**Goal:** Checkers, then Battleship (TODOS order).
+**Status:** Complete (July 2026).
 
 **Tasks**
 
-- [ ] **Checkers:** 8×8, forced jumps, king promotion — implement `Game` variant + tests before LLM prompts
-- [ ] **Battleship:** hidden board + shot coordinate schema; longer matches — consider stricter turn cap
-- [ ] Register in `Game::new`, CSV, server, both UIs
-- [ ] Update README game table
+- [x] **Checkers:** 8×8, forced jumps (including chains), king promotion, and rule tests
+- [x] **Battleship:** hidden opponent fleet state, shot coordinate schema, and bounded turn count
+- [x] Register both games in `Game::new`, CSV, server, and HTMX UI
+- [x] Update the README game table and examples
 
-**Exit:** Each game has unit tests for rules; one smoke LLM match documented in plan or README.
+**Exit:** Each game has unit tests for rules and one smoke LLM match documented in the plan or README.
 
 ---
 
 ### Phase 7 — Optional backlog
 
-- [ ] Per-agent custom prompts (extend `AIAgentConfig` + secrets-safe prompt files)
-- [ ] Leaderboard materialized view (SQLite table or DuckDB aggregate)
-- [ ] DuckDB export job + example analytics queries
-- [ ] CI: `cargo test`, `cargo clippy`, `npm run build` in GitHub Actions
-- [ ] Auth for server (local token) if binding beyond localhost
+**Status:** Complete (July 2026).
+
+- [x] Per-agent custom prompts via paths in `AIAgentConfig`; prompt contents remain outside run history
+- [x] DuckDB-backed leaderboard aggregate for completed runs
+- [x] Example DuckDB analytics queries
+- [x] CI: formatting, check, test, and clippy in GitHub Actions
+- [x] Optional bearer token for server routes when binding beyond localhost
 
 ---
 
@@ -295,9 +291,9 @@ ai_arena serve --host 0.0.0.0 --port 3000 --static-dir web/dist
 | Missing API keys panic via `.expect()` | Return `Result` from `build_agents`; surface 400/500 in API |
 | Invalid moves cause infinite loops | Per-game max invalid retries; global max turns; mark run failed |
 | LLM cost / rate limits on matrix | Concurrency cap; optional dry-run/mock agent for tests |
-| Two UIs diverge | Single `GameEvent` + OpenAPI or README contract |
-| SQLite write contention on huge matrix | Batch inserts; WAL mode; single writer task per process |
-| React + HTMX maintenance | Hybrid: shared backend; HTMX only after APIs stable (Phase 5) |
+| UI and JSON endpoints diverge | HTMX route tests plus a small documented API/event contract |
+| DuckDB write contention on huge matrix | Batch inserts; single writer task per process |
+| Frontend complexity creeps back in | Keep product UI server-rendered; no npm/Vite/React required for core flows |
 
 ---
 
@@ -306,36 +302,33 @@ ai_arena serve --host 0.0.0.0 --port 3000 --static-dir web/dist
 | Phase | Metric |
 |-------|--------|
 | 1 | Server integration tests green; bind on arbitrary port verified |
-| 2 | CLI and web show identical turn count for same `run_id` |
-| 3 | Replay from DB matches original WS stream |
-| 4 | Matrix of ≥100 games completes; no OOM at default concurrency |
-| 5 | HTMX root page starts and watches one game without React dev server |
-| 6 | Checkers unit tests + one recorded agent match |
+| 2 | HTMX root page starts and creates one game without npm |
+| 3 | CLI and HTMX UI show identical turn count for same `run_id` |
+| 4 | Replay from DB matches original event stream |
+| 5 | Matrix of ≥100 games completes; no OOM at default concurrency |
+| 6 | Checkers and Battleship unit tests + recorded agent matches |
 
 ---
 
 ## Implementation Order (summary)
 
-1. **Phase 0** — docs + config parity  
-2. **Phase 1** — server host/port/static + tests *(accepted first milestone)*  
-3. **Phase 2** — typed `GameEvent` + observation  
-4. **Phase 3** — SQLite + replay  
-5. **Phase 4** — matrix + parallelism  
-6. **Phase 5** — HTMX layer  
-7. **Phase 6** — Checkers, Battleship  
-8. **Phase 7** — optional analytics and polish  
+1. **Phase 3** — typed `GameEvent` + CLI observation
+2. **Phase 4** — replay on top of the existing DuckDB history
+3. **Phase 5** — matrix + parallelism
+4. **Phase 6** — Checkers and Battleship
+5. **Phase 7** — optional analytics and polish
 
 ---
 
 ## Out of Scope (this plan)
 
 - Multi-user auth and hosted Postgres (until deployment model is chosen)
-- Full chess board renderer (minimal FEN acceptable until Phase 2)
+- Full chess board renderer (minimal FEN is acceptable until explicitly prioritized)
 - “Allow cheating” mode from README open questions
-- Replacing React in Phase 1–4 (deferred to Phase 5)
+- Maintaining React/Vite as a product UI path
 
 ---
 
 ## Acceptance
 
-This plan is **accepted** when stored at `plans/ai-arena-roadmap.md` and used as the sequencing reference for implementation PRs. First implementation slice: **Phase 1 — Server mode foundation**.
+This plan is **accepted** when stored at `plans/ai-arena-roadmap.md` and used as the sequencing reference for implementation PRs. Next implementation slice: **Phase 3 — typed events and CLI observation**.

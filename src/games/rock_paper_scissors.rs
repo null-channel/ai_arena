@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Instant;
 
 use crate::agent::{AIAgent, MoveRequest, MoveResponse};
+use crate::games::events::GameEvent;
 use crate::games::stats::{GameStats, TurnStats};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -86,7 +87,11 @@ impl RockPaperScissors {
         }
     }
 
-    pub async fn play_game(mut self, agents: Vec<AIAgent>) -> RockPaperScissorsResult {
+    pub async fn play_game(
+        mut self,
+        agents: Vec<AIAgent>,
+        observer: Option<tokio::sync::mpsc::Sender<GameEvent>>,
+    ) -> RockPaperScissorsResult {
         let start_time = Instant::now();
 
         // Ensure we have exactly 2 agents
@@ -103,7 +108,7 @@ impl RockPaperScissors {
 
         // Play rounds until someone wins or we run out of rounds
         let rounds_to_win = (self.config.rounds / 2) + 1;
-        
+
         while !self.state.game_over && self.state.round < self.config.rounds {
             self.state.round += 1;
 
@@ -121,6 +126,13 @@ impl RockPaperScissors {
                     }
                 }
             };
+
+            // Send state update if observer is present
+            if let Some(observer) = &observer {
+                let event =
+                    GameEvent::turn("RockPaperScissors", self.state.round, self.state_to_json());
+                let _ = observer.send(event).await;
+            }
 
             // Update scores
             match round_result.winner {
@@ -197,6 +209,7 @@ impl RockPaperScissors {
             game_id: self.game_id.clone(),
             state: state_json.clone(),
             expected_move_schema: move_schema.clone(),
+            instructions: None,
         };
 
         let move_request_two = MoveRequest {
@@ -204,6 +217,7 @@ impl RockPaperScissors {
             game_id: self.game_id.clone(),
             state: state_json.clone(),
             expected_move_schema: move_schema.clone(),
+            instructions: None,
         };
 
         // Get moves from both agents (could be parallelized in the future)
@@ -222,13 +236,13 @@ impl RockPaperScissors {
         // Parse choices
         let choice_one_result = self.parse_choice(&move_response_one.chosen_move, "Player 1");
         let choice_two_result = self.parse_choice(&move_response_two.chosen_move, "Player 2");
-        
+
         let (choice_one, choice_one_valid, choice_one_error) = match choice_one_result {
             Ok(Some(c)) => (Some(c), true, None),
             Ok(None) => (None, false, Some("Invalid choice".to_string())),
             Err(e) => (None, false, Some(e)),
         };
-        
+
         let (choice_two, choice_two_valid, choice_two_error) = match choice_two_result {
             Ok(Some(c)) => (Some(c), true, None),
             Ok(None) => (None, false, Some("Invalid choice".to_string())),
@@ -355,15 +369,15 @@ mod tests {
         // Rock beats Scissors
         assert!(Choice::Rock.beats(Choice::Scissors));
         assert!(!Choice::Scissors.beats(Choice::Rock));
-        
+
         // Paper beats Rock
         assert!(Choice::Paper.beats(Choice::Rock));
         assert!(!Choice::Rock.beats(Choice::Paper));
-        
+
         // Scissors beats Paper
         assert!(Choice::Scissors.beats(Choice::Paper));
         assert!(!Choice::Paper.beats(Choice::Scissors));
-        
+
         // Same choices don't beat each other
         assert!(!Choice::Rock.beats(Choice::Rock));
         assert!(!Choice::Paper.beats(Choice::Paper));
@@ -374,7 +388,7 @@ mod tests {
     fn test_rock_paper_scissors_new() {
         let config = RockPaperScissorsConfig::default();
         let game = RockPaperScissors::new(config);
-        
+
         assert_eq!(game.state.round, 0);
         assert_eq!(game.state.player_one_score, 0);
         assert_eq!(game.state.player_two_score, 0);
@@ -386,7 +400,7 @@ mod tests {
     fn test_rock_paper_scissors_new_custom_rounds() {
         let config = RockPaperScissorsConfig { rounds: 5 };
         let game = RockPaperScissors::new(config);
-        
+
         assert_eq!(game.config.rounds, 5);
     }
 
@@ -394,29 +408,34 @@ mod tests {
     fn test_parse_choice_valid() {
         let config = RockPaperScissorsConfig::default();
         let game = RockPaperScissors::new(config);
-        
+
         use serde_json::json;
-        
+
         assert_eq!(
-            game.parse_choice(&json!({"choice": "rock"}), "Test").unwrap(),
+            game.parse_choice(&json!({"choice": "rock"}), "Test")
+                .unwrap(),
             Some(Choice::Rock)
         );
         assert_eq!(
-            game.parse_choice(&json!({"choice": "paper"}), "Test").unwrap(),
+            game.parse_choice(&json!({"choice": "paper"}), "Test")
+                .unwrap(),
             Some(Choice::Paper)
         );
         assert_eq!(
-            game.parse_choice(&json!({"choice": "scissors"}), "Test").unwrap(),
+            game.parse_choice(&json!({"choice": "scissors"}), "Test")
+                .unwrap(),
             Some(Choice::Scissors)
         );
-        
+
         // Case insensitive
         assert_eq!(
-            game.parse_choice(&json!({"choice": "ROCK"}), "Test").unwrap(),
+            game.parse_choice(&json!({"choice": "ROCK"}), "Test")
+                .unwrap(),
             Some(Choice::Rock)
         );
         assert_eq!(
-            game.parse_choice(&json!({"choice": "Paper"}), "Test").unwrap(),
+            game.parse_choice(&json!({"choice": "Paper"}), "Test")
+                .unwrap(),
             Some(Choice::Paper)
         );
     }
@@ -425,18 +444,19 @@ mod tests {
     fn test_parse_choice_invalid() {
         let config = RockPaperScissorsConfig::default();
         let game = RockPaperScissors::new(config);
-        
+
         use serde_json::json;
-        
+
         // Invalid choice string
         assert_eq!(
-            game.parse_choice(&json!({"choice": "invalid"}), "Test").unwrap(),
+            game.parse_choice(&json!({"choice": "invalid"}), "Test")
+                .unwrap(),
             None
         );
-        
+
         // Missing choice field
         assert!(game.parse_choice(&json!({}), "Test").is_err());
-        
+
         // Wrong type
         assert!(game.parse_choice(&json!({"choice": 123}), "Test").is_err());
     }
@@ -447,4 +467,3 @@ mod tests {
         assert_eq!(config.rounds, 3);
     }
 }
-

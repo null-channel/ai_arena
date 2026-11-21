@@ -2,19 +2,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_config::{AIAgentConfig, build_agents};
 
-use super::rock_paper_scissors::{RockPaperScissors, RockPaperScissorsConfig as GameRockPaperScissorsConfig};
-use super::tic_tac_toe::{TicTacToe, TicTacToeConfig as GameTicTacToeConfig};
+use super::battleship::{Battleship, BattleshipConfig as GameBattleshipConfig, BattleshipResult};
+use super::checkers::{Checkers, CheckersConfig as GameCheckersConfig, CheckersResult};
+use super::chess::{Chess, ChessConfig as GameChessConfig, ChessResult};
 use super::connect_four::{ConnectFour, ConnectFourConfig as GameConnectFourConfig};
+use super::events::GameEvent;
+use super::rock_paper_scissors::{
+    RockPaperScissors, RockPaperScissorsConfig as GameRockPaperScissorsConfig,
+};
 use super::stats::GameStats;
+use super::tic_tac_toe::{TicTacToe, TicTacToeConfig as GameTicTacToeConfig};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Game {
     TicTacToe(TicTacToeConfig),
     RockPaperScissors(RockPaperScissorsConfig),
     ConnectFour(ConnectFourConfig),
+    Chess(ChessConfig),
+    Checkers(CheckersConfig),
+    Battleship(BattleshipConfig),
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub enum PlayerOrder {
     Random,
     Decending,
@@ -24,7 +33,7 @@ pub enum PlayerOrder {
     ReverseOrderInList,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TicTacToeConfig {
     pub board_size: u32,
     pub win_length: u32,
@@ -42,7 +51,7 @@ impl Default for TicTacToeConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RockPaperScissorsConfig {
     pub rounds: u32,
     #[serde(default)]
@@ -58,7 +67,7 @@ impl Default for RockPaperScissorsConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConnectFourConfig {
     pub rows: u32,
     pub cols: u32,
@@ -78,11 +87,63 @@ impl Default for ConnectFourConfig {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChessConfig {
+    #[serde(default)]
+    pub start_fen: Option<String>,
+    #[serde(default)]
+    pub order: PlayerOrder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CheckersConfig {
+    pub max_turns: u32,
+    #[serde(default)]
+    pub order: PlayerOrder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BattleshipConfig {
+    pub max_turns: u32,
+    #[serde(default)]
+    pub order: PlayerOrder,
+}
+
+impl Default for BattleshipConfig {
+    fn default() -> Self {
+        Self {
+            max_turns: 160,
+            order: PlayerOrder::default(),
+        }
+    }
+}
+
+impl Default for CheckersConfig {
+    fn default() -> Self {
+        Self {
+            max_turns: 200,
+            order: PlayerOrder::default(),
+        }
+    }
+}
+
+impl Default for ChessConfig {
+    fn default() -> Self {
+        ChessConfig {
+            start_fen: None,
+            order: PlayerOrder::default(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TestResult {
     TicTacToe(TicTacToeResult),
     RockPaperScissors(RockPaperScissorsResult),
     ConnectFour(ConnectFourResult),
+    Chess(ChessResult),
+    Checkers(CheckersResult),
+    Battleship(BattleshipResult),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -108,10 +169,13 @@ pub struct ConnectFourResult {
 
 impl From<&str> for Game {
     fn from(name: &str) -> Self {
-        match name {
-            "TicTacToe" => Game::TicTacToe(TicTacToeConfig::default()),
-            "RockPaperScissors" => Game::RockPaperScissors(RockPaperScissorsConfig::default()),
-            "ConnectFour" => Game::ConnectFour(ConnectFourConfig::default()),
+        match name.to_lowercase().as_str() {
+            "tictactoe" => Game::TicTacToe(TicTacToeConfig::default()),
+            "rockpaperscissors" => Game::RockPaperScissors(RockPaperScissorsConfig::default()),
+            "connectfour" => Game::ConnectFour(ConnectFourConfig::default()),
+            "chess" => Game::Chess(ChessConfig::default()),
+            "checkers" => Game::Checkers(CheckersConfig::default()),
+            "battleship" => Game::Battleship(BattleshipConfig::default()),
             _ => panic!("Unknown game name: {}", name),
         }
     }
@@ -119,10 +183,15 @@ impl From<&str> for Game {
 
 impl Game {
     pub fn new(name: &str) -> Option<Self> {
-        match name {
-            "TicTacToe" => Some(Game::TicTacToe(TicTacToeConfig::default())),
-            "RockPaperScissors" => Some(Game::RockPaperScissors(RockPaperScissorsConfig::default())),
-            "ConnectFour" => Some(Game::ConnectFour(ConnectFourConfig::default())),
+        match name.to_lowercase().as_str() {
+            "tictactoe" => Some(Game::TicTacToe(TicTacToeConfig::default())),
+            "rockpaperscissors" => {
+                Some(Game::RockPaperScissors(RockPaperScissorsConfig::default()))
+            }
+            "connectfour" => Some(Game::ConnectFour(ConnectFourConfig::default())),
+            "chess" => Some(Game::Chess(ChessConfig::default())),
+            "checkers" => Some(Game::Checkers(CheckersConfig::default())),
+            "battleship" => Some(Game::Battleship(BattleshipConfig::default())),
             _ => None,
         }
     }
@@ -132,20 +201,28 @@ impl Game {
             Game::TicTacToe(_) => "TicTacToe",
             Game::RockPaperScissors(_) => "RockPaperScissors",
             Game::ConnectFour(_) => "ConnectFour",
+            Game::Chess(_) => "Chess",
+            Game::Checkers(_) => "Checkers",
+            Game::Battleship(_) => "Battleship",
         }
     }
 
-    pub async fn play_game(&self, agents: Vec<AIAgentConfig>) -> TestResult {
-        match self {
+    pub async fn play_game(
+        &self,
+        agents: Vec<AIAgentConfig>,
+        observer: Option<tokio::sync::mpsc::Sender<GameEvent>>,
+        secrets: Option<&crate::secrets::SecretsManager>,
+    ) -> TestResult {
+        let result = match self {
             Game::TicTacToe(config) => {
-                let agents = build_agents(agents);
+                let agents = build_agents(agents, secrets);
                 let game_config = GameTicTacToeConfig {
                     board_size: config.board_size,
                     win_length: config.win_length,
                 };
                 let game = TicTacToe::new(game_config);
-                let result = game.play_game(agents).await;
-                
+                let result = game.play_game(agents, observer.clone()).await;
+
                 TestResult::TicTacToe(TicTacToeResult {
                     winner: result.winner.clone(),
                     stats: result.stats,
@@ -153,13 +230,13 @@ impl Game {
                 })
             }
             Game::RockPaperScissors(config) => {
-                let agents = build_agents(agents);
+                let agents = build_agents(agents, secrets);
                 let game_config = GameRockPaperScissorsConfig {
                     rounds: config.rounds,
                 };
                 let game = RockPaperScissors::new(game_config);
-                let result = game.play_game(agents).await;
-                
+                let result = game.play_game(agents, observer.clone()).await;
+
                 TestResult::RockPaperScissors(RockPaperScissorsResult {
                     winner: result.winner.clone(),
                     stats: result.stats,
@@ -167,21 +244,87 @@ impl Game {
                 })
             }
             Game::ConnectFour(config) => {
-                let agents = build_agents(agents);
+                let agents = build_agents(agents, secrets);
                 let game_config = GameConnectFourConfig {
                     rows: config.rows,
                     cols: config.cols,
                     win_length: config.win_length,
                 };
                 let game = ConnectFour::new(game_config);
-                let result = game.play_game(agents).await;
-                
+                let result = game.play_game(agents, observer.clone()).await;
+
                 TestResult::ConnectFour(ConnectFourResult {
                     winner: result.winner.clone(),
                     stats: result.stats,
                     error: result.error,
                 })
             }
+            Game::Chess(config) => {
+                let agents = build_agents(agents, secrets);
+                let game_config = GameChessConfig {
+                    start_fen: config.start_fen.clone(),
+                };
+                let game = Chess::new(game_config);
+                let result = game.play_game(agents, observer.clone()).await;
+
+                TestResult::Chess(result)
+            }
+            Game::Checkers(config) => {
+                let agents = build_agents(agents, secrets);
+                let game = Checkers::new(GameCheckersConfig {
+                    max_turns: config.max_turns,
+                });
+                TestResult::Checkers(game.play_game(agents, observer.clone()).await)
+            }
+            Game::Battleship(config) => {
+                let agents = build_agents(agents, secrets);
+                let game = Battleship::new(GameBattleshipConfig {
+                    max_turns: config.max_turns,
+                });
+                TestResult::Battleship(game.play_game(agents, observer.clone()).await)
+            }
+        };
+
+        if let Some(observer) = observer {
+            let event = match result.error() {
+                Some(message) => GameEvent::Error {
+                    game_type: self.name().to_string(),
+                    message: message.to_string(),
+                },
+                None => GameEvent::Complete {
+                    game_type: self.name().to_string(),
+                    result: serde_json::to_value(&result).unwrap_or_else(
+                        |error| serde_json::json!({"serialization_error": error.to_string()}),
+                    ),
+                },
+            };
+            let _ = observer.send(event).await;
+        }
+
+        result
+    }
+}
+
+impl TestResult {
+    pub fn stats(&self) -> &GameStats {
+        match self {
+            TestResult::TicTacToe(result) => &result.stats,
+            TestResult::RockPaperScissors(result) => &result.stats,
+            TestResult::ConnectFour(result) => &result.stats,
+            TestResult::Chess(result) => &result.stats,
+            TestResult::Checkers(result) => &result.stats,
+            TestResult::Battleship(result) => &result.stats,
+        }
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            TestResult::TicTacToe(result) => result.error.as_deref(),
+            TestResult::RockPaperScissors(result) => result.error.as_deref(),
+            TestResult::ConnectFour(result) => result.error.as_deref(),
+            TestResult::Chess(result) => result.error.as_deref(),
+            TestResult::Checkers(result) => result.error.as_deref(),
+            TestResult::Battleship(result) => result.error.as_deref(),
         }
     }
 }
@@ -193,8 +336,14 @@ mod tests {
     #[test]
     fn test_game_from_string() {
         assert!(matches!(Game::from("TicTacToe"), Game::TicTacToe(_)));
-        assert!(matches!(Game::from("RockPaperScissors"), Game::RockPaperScissors(_)));
+        assert!(matches!(
+            Game::from("RockPaperScissors"),
+            Game::RockPaperScissors(_)
+        ));
         assert!(matches!(Game::from("ConnectFour"), Game::ConnectFour(_)));
+        assert!(matches!(Game::from("Chess"), Game::Chess(_)));
+        assert!(matches!(Game::from("Checkers"), Game::Checkers(_)));
+        assert!(matches!(Game::from("Battleship"), Game::Battleship(_)));
     }
 
     #[test]
@@ -206,8 +355,17 @@ mod tests {
     #[test]
     fn test_game_new() {
         assert!(matches!(Game::new("TicTacToe"), Some(Game::TicTacToe(_))));
-        assert!(matches!(Game::new("RockPaperScissors"), Some(Game::RockPaperScissors(_))));
-        assert!(matches!(Game::new("ConnectFour"), Some(Game::ConnectFour(_))));
+        assert!(matches!(
+            Game::new("RockPaperScissors"),
+            Some(Game::RockPaperScissors(_))
+        ));
+        assert!(matches!(
+            Game::new("ConnectFour"),
+            Some(Game::ConnectFour(_))
+        ));
+        assert!(matches!(Game::new("Chess"), Some(Game::Chess(_))));
+        assert!(matches!(Game::new("Checkers"), Some(Game::Checkers(_))));
+        assert!(matches!(Game::new("Battleship"), Some(Game::Battleship(_))));
         assert_eq!(Game::new("InvalidGame"), None);
     }
 
@@ -216,6 +374,9 @@ mod tests {
         assert_eq!(Game::from("TicTacToe").name(), "TicTacToe");
         assert_eq!(Game::from("RockPaperScissors").name(), "RockPaperScissors");
         assert_eq!(Game::from("ConnectFour").name(), "ConnectFour");
+        assert_eq!(Game::from("Chess").name(), "Chess");
+        assert_eq!(Game::from("Checkers").name(), "Checkers");
+        assert_eq!(Game::from("Battleship").name(), "Battleship");
     }
 
     #[test]
@@ -240,9 +401,20 @@ mod tests {
     }
 
     #[test]
+    fn test_chess_config_default() {
+        let config = ChessConfig::default();
+        assert_eq!(config.start_fen, None);
+    }
+
+    #[test]
+    fn test_new_game_config_defaults() {
+        assert_eq!(CheckersConfig::default().max_turns, 200);
+        assert_eq!(BattleshipConfig::default().max_turns, 160);
+    }
+
+    #[test]
     fn test_player_order_default() {
         let order = PlayerOrder::default();
         assert!(matches!(order, PlayerOrder::OrderInList));
     }
 }
-

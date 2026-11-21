@@ -1,19 +1,21 @@
 use async_openai::{
-    config::OpenAIConfig,
     Client,
+    config::OpenAIConfig,
     types::{
         ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
         ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs, ResponseFormat,
     },
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
+use crate::agents::prompt;
 
 pub struct OpenAIAgent {
     name: String,
     model: String,
     client: Client<OpenAIConfig>,
+    custom_prompt: Option<String>,
 }
 
 impl OpenAIAgent {
@@ -21,28 +23,28 @@ impl OpenAIAgent {
         &self.name
     }
 
-    pub fn new(name: impl Into<String>, model: impl Into<String>, api_key: impl Into<String>) -> Result<Self, AgentError> {
+    pub fn new(
+        name: impl Into<String>,
+        model: impl Into<String>,
+        api_key: impl Into<String>,
+        custom_prompt: Option<String>,
+    ) -> Result<Self, AgentError> {
         let api_key = api_key.into();
         // Create config with the API key directly - no environment variable manipulation needed
         let config = OpenAIConfig::new().with_api_key(&api_key);
         let client = Client::with_config(config);
-        
+
         Ok(Self {
             name: name.into(),
             model: model.into(),
             client,
+            custom_prompt,
         })
     }
 
     pub async fn execute_turn(&self, request: &MoveRequest) -> AgentResult<MoveResponse> {
-        let system = "You are a game-playing AI. Respond ONLY with strict JSON matching the expected schema. Do not include any text outside JSON.";
-        let user = json!({
-            "turn_index": request.turn_index,
-            "game_id": request.game_id,
-            "state": request.state,
-            "expected_move_schema": request.expected_move_schema,
-        })
-        .to_string();
+        let system = prompt::system_prompt(request, self.custom_prompt.as_deref());
+        let user = prompt::user_prompt(request);
 
         let messages: Vec<ChatCompletionRequestMessage> = vec![
             ChatCompletionRequestSystemMessageArgs::default()
@@ -66,7 +68,8 @@ impl OpenAIAgent {
 
         // Use the client that was created with the API key during initialization
         // No environment variable manipulation needed - eliminates race conditions
-        let resp = self.client
+        let resp = self
+            .client
             .chat()
             .create(req)
             .await
