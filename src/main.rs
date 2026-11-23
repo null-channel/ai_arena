@@ -375,7 +375,7 @@ struct ServeArgs {
     /// Port to listen on
     #[arg(long, default_value_t = 3000)]
     port: u16,
-    /// Directory of built static assets (e.g. web/dist)
+    /// Optional directory of additional static assets
     #[arg(long)]
     static_dir: Option<std::path::PathBuf>,
     /// Path to the DuckDB file used for run history

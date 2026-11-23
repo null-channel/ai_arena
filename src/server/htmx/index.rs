@@ -21,9 +21,8 @@ pub(in crate::server) fn render_index_page(
         r##"
         <section class="hero">
             <div>
-                <p class="eyebrow">server-rendered arena control room</p>
+                <p class="eyebrow">AI Arena control room</p>
                 <h1>AI Arena</h1>
-                <p class="lede">Start matches, watch sessions, and keep the whole UI inside the Rust binary. No npm build step.</p>
             </div>
             <div class="hero-card">
                 <span class="metric-label">Active Sessions</span>

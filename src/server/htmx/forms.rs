@@ -81,7 +81,6 @@ pub(in crate::server) fn render_start_form(
     html.push_str(
         r#"<div class="actions">
             <button type="submit">Start Battle</button>
-            <span class="metric-label">Runs server-side; page updates with HTMX fragments.</span>
         </div>"#,
     );
     html.push_str("</form>");

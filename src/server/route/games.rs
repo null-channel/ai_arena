@@ -65,7 +65,7 @@ pub struct StartGameForm {
     agent_one_kind: String,
     agent_one_model: String,
     agent_one_temp: f32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_seed")]
     agent_one_seed: Option<u64>,
     #[serde(default)]
     agent_one_secret_profile: Option<String>,
@@ -76,7 +76,7 @@ pub struct StartGameForm {
     agent_two_kind: String,
     agent_two_model: String,
     agent_two_temp: f32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_seed")]
     agent_two_seed: Option<u64>,
     #[serde(default)]
     agent_two_secret_profile: Option<String>,
@@ -141,6 +141,15 @@ impl StartGameForm {
     }
 }
 
+fn optional_seed<'de, D: serde::Deserializer<'de>>(field: D) -> Result<Option<u64>, D::Error> {
+    let value = String::deserialize(field)?;
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        value.parse().map(Some).map_err(serde::de::Error::custom)
+    }
+}
+
 fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(|v| {
         let trimmed = v.trim();
@@ -168,17 +177,16 @@ async fn game_page(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
 ) -> Result<Html<String>, AppError> {
-    let (game, event) = game_detail(&state, &game_id).await?;
-    let fragment = htmx::render_game_fragment(&game, event.as_ref());
-    Ok(Html(htmx::render_game_page(&game_id, &fragment)))
+    let Html(fragment) = game_fragment(State(state), Path(game_id)).await?;
+    Ok(Html(htmx::render_game_page(&fragment)))
 }
 
 async fn game_fragment(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
 ) -> Result<Html<String>, AppError> {
-    let (game, event) = game_detail(&state, &game_id).await?;
-    Ok(Html(htmx::render_game_fragment(&game, event.as_ref())))
+    let (game, events) = game_detail(&state, &game_id).await?;
+    Ok(Html(htmx::render_game_fragment(&game, &events)?))
 }
 
 async fn start_game_from_form(
@@ -273,11 +281,11 @@ async fn get_game_state(
     State(state): State<AppState>,
     Path(game_id): Path<String>,
 ) -> Result<Json<GameStateResponse>, AppError> {
-    let (game, latest_event) = game_detail(&state, &game_id).await?;
+    let (game, events) = game_detail(&state, &game_id).await?;
     Ok(Json(GameStateResponse {
         game_id,
         status: game.status,
-        latest_event,
+        latest_event: events.last().cloned(),
         result: game.result,
     }))
 }
@@ -363,7 +371,7 @@ mod tests {
     async fn start_game_redirects_to_observation_page() {
         let app = build_router(test_state(), None);
         let body = Body::from(
-            "game_type=TicTacToe&agent_one_kind=Ollama&agent_one_model=m1&agent_one_temp=0.7&agent_one_seed=1&agent_one_api_endpoint=http%3A%2F%2F127.0.0.1%3A11434&agent_two_kind=Ollama&agent_two_model=m2&agent_two_temp=0.7&agent_two_seed=2&agent_two_api_endpoint=http%3A%2F%2F127.0.0.1%3A11434",
+            "game_type=TicTacToe&agent_one_kind=Ollama&agent_one_model=m1&agent_one_temp=0.7&agent_one_seed=&agent_one_api_endpoint=http%3A%2F%2F127.0.0.1%3A11434&agent_two_kind=Ollama&agent_two_model=m2&agent_two_temp=0.7&agent_two_seed=2&agent_two_api_endpoint=http%3A%2F%2F127.0.0.1%3A11434",
         );
         let response = app
             .oneshot(
@@ -397,15 +405,23 @@ mod tests {
                 game: Game::new("TicTacToe").unwrap(),
                 agents: Vec::new(),
                 status: GameStatus::Running,
-                latest_event: Some(GameEvent::turn(
-                    "TicTacToe",
-                    2,
-                    json!({
-                        "board": [["X", null, null], [null, "O", null], [null, null, null]],
-                        "current_player": "X",
-                        "turn_number": 2
-                    }),
-                )),
+                events: vec![
+                    GameEvent::turn(
+                        "TicTacToe",
+                        1,
+                        json!({"note": "<script>first turn</script>"}),
+                    ),
+                    GameEvent::turn(
+                        "TicTacToe",
+                        2,
+                        json!({
+                            "board": [["X", null, null], [null, "O", null], [null, null, null]],
+                            "current_player": "X",
+                            "turn_number": 2
+                        }),
+                    ),
+                ]
+                .into(),
                 result: None,
             },
         );
@@ -450,6 +466,11 @@ mod tests {
         assert!(html.contains("gpt-test"));
         assert!(html.contains("class=\"game-board\""));
         assert!(html.contains("piece-x"));
+        assert!(html.contains("Battle Log"));
+        assert!(html.contains("Turn 1"));
+        assert!(html.contains("Turn 2"));
+        assert!(html.contains("first turn"));
+        assert!(!html.contains("<script>first turn</script>"));
     }
 
     #[tokio::test]
@@ -463,7 +484,7 @@ mod tests {
                 game: Game::new("TicTacToe").unwrap(),
                 agents: Vec::new(),
                 status: GameStatus::Running,
-                latest_event: None,
+                events: Default::default(),
                 result: None,
             },
         );
@@ -481,7 +502,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
-        assert!(body.contains("hx-trigger=\"load, every 500ms\""));
+        assert_eq!(body.matches("hx-trigger=\"every 500ms\"").count(), 1);
+        assert!(body.contains("Waiting for the first turn."));
     }
 
     #[tokio::test]

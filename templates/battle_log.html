@@ -1,0 +1,11 @@
+<section aria-labelledby="battle-log-title">
+    <h3 id="battle-log-title">Battle Log</h3>
+    {% for (index, state) in turns.iter().enumerate().rev() %}
+    <details id="turn-{{ game_id }}-{{ index }}"{% if live %} hx-preserve{% endif %}>
+        <summary>Turn {{ index + 1 }}</summary>
+        <pre>{{ "{:#}"|format(state) }}</pre>
+    </details>
+    {% else %}
+    <p class="empty">{% if live %}Waiting for the first turn.{% else %}No turns recorded.{% endif %}</p>
+    {% endfor %}
+</section>

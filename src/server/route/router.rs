@@ -8,7 +8,7 @@ use axum::{
 };
 use tower_http::{
     cors::{Any, CorsLayer},
-    services::{ServeDir, ServeFile},
+    services::ServeDir,
 };
 
 use super::{games, leaderboard, matrix, runs, secrets, websocket};
@@ -43,11 +43,7 @@ pub(in crate::server) fn build_router(
     };
 
     match static_dir {
-        Some(dir) => {
-            let index_path = dir.join("index.html");
-            let serve_dir = ServeDir::new(dir).not_found_service(ServeFile::new(index_path));
-            api.fallback_service(serve_dir)
-        }
+        Some(dir) => api.fallback_service(ServeDir::new(dir)),
         None => api,
     }
 }
@@ -190,16 +186,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn static_dir_serves_index_html() {
+    async fn static_dir_serves_assets_and_returns_404_for_missing_paths() {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("index.html"), "<html>arena</html>").unwrap();
+        std::fs::write(dir.path().join("arena.css"), "body {}").unwrap();
 
         let app = build_router(test_state(), Some(dir.path()));
-        let response = app
-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        let asset = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/arena.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(response_text(asset).await, "body {}");
+        let missing = app
+            .oneshot(
+                Request::builder()
+                    .uri("/missing")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert!(!response_text(missing).await.contains("<html>arena</html>"));
     }
 }

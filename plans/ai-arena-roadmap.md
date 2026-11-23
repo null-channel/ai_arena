@@ -25,7 +25,7 @@ This plan aligns `TODOS.md` with the current codebase and sequences the remainin
 - **Stats**: Per-turn `GameStats` with CLI table output (`src/games/display.rs`)
 - **Batch**: Sequential CSV runner (`src/csv_runner.rs`)
 - **Server**: Axum REST + WebSocket, configurable bind address, optional static serving (`src/server/mod.rs`)
-- **Web**: HTMX product UI at `/` can start games, list sessions, and observe a game's readable board/status through polling. The React/Vite prototype in `web/` is legacy only.
+- **Web**: HTMX product UI at `/` can start games, list sessions, and observe the board, status, and battle log through polling.
 - **Secrets**: TOML profiles + optional encryption (`src/secrets.rs`)
 - **Tests**: Rust unit/integration tests passing (`cargo test`)
 
@@ -46,7 +46,7 @@ This plan aligns `TODOS.md` with the current codebase and sequences the remainin
 
 ### Doc / stack drift
 
-- `web/` React/Vite prototype exists but is no longer the target UI path
+- New HTMX markup uses Askama templates in `templates/`
 - HTMX routes, templates, and route tests are first-class Axum features
 - The browser UI works directly from the Rust binary without an npm build step
 
@@ -165,14 +165,14 @@ ai_arena serve --host 0.0.0.0 --port 3000
 
 - [x] Add `--host`, `--port` (defaults: `127.0.0.1`, `3000`) to `Serve` subcommand
 - [x] Bind `TcpListener` to configured address; log effective URL
-- [x] Serve static assets from `--static-dir` when set (`tower_http::services::ServeDir` + `index.html` fallback for legacy/prototype assets)
+- [x] Serve static assets from `--static-dir` when set (`tower_http::services::ServeDir`)
 - [x] `GET /api/games` — list in-memory sessions (id, game type, status) for UI matrix later
 - [x] Standardize error responses (JSON `{ "error": "..." }` already partial)
 - [x] **Tests:** integration tests using `axum::test` or `reqwest` against spawned server:
   - health returns 200
   - server listens on chosen port (ephemeral port in test)
   - create game returns `game_id`; invalid game type returns 400
-  - static route serves `index.html` when dir provided
+  - static route serves files from the configured directory
 
 **Exit:** `cargo test` includes server tests; `ai_arena serve` configurable; ready for HTMX routes at `/`.
 

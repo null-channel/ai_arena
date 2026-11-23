@@ -5,23 +5,30 @@ use super::{
 use crate::{
     agent_config::AIAgentConfig,
     games::{events::GameEvent, game::TestResult, stats::GameStats},
-    server::sessions::{GameStatus, GameSummary},
+    server::{
+        error::AppError,
+        sessions::{GameStatus, GameSummary},
+    },
 };
+use askama::Template;
+use serde_json::Value;
 
-pub(in crate::server) fn render_game_page(game_id: &str, fragment: &str) -> String {
+#[derive(Template)]
+#[template(path = "battle_log.html")]
+struct BattleLog<'a> {
+    game_id: &'a str,
+    turns: Vec<&'a Value>,
+    live: bool,
+}
+
+pub(in crate::server) fn render_game_page(fragment: &str) -> String {
     let content = format!(
         r#"
         <main class="stack">
             <a class="back-link" href="/">← Back to arena</a>
-            <section class="panel">
-                <div id="game-detail" hx-get="/games/{}/fragment" hx-trigger="load, every 500ms" hx-swap="outerHTML">
-                    {}
-                </div>
-            </section>
+            <section class="panel">{fragment}</section>
         </main>
         "#,
-        html_escape(game_id),
-        fragment
     );
     layout("AI Arena Game", &content)
 }
@@ -111,8 +118,8 @@ pub(in crate::server) fn render_games_fragment(sessions: &[GameSummary]) -> Stri
 
 pub(in crate::server) fn render_game_fragment(
     game: &GameSummary,
-    latest_event: Option<&GameEvent>,
-) -> String {
+    events: &[GameEvent],
+) -> Result<String, AppError> {
     let GameSummary {
         game_id,
         game_type,
@@ -120,8 +127,17 @@ pub(in crate::server) fn render_game_fragment(
         status,
         result,
     } = game;
+    let live = matches!(status, GameStatus::Pending | GameStatus::Running);
+    let poll = if live {
+        format!(
+            r#" hx-get="/games/{}/fragment" hx-trigger="every 500ms" hx-swap="outerHTML""#,
+            html_escape(game_id)
+        )
+    } else {
+        String::new()
+    };
     let mut html = format!(
-        r#"<div id="game-detail" hx-get="/games/{}/fragment" hx-trigger="every 500ms" hx-swap="outerHTML">
+        r#"<div id="game-detail"{poll}>
             <div class="panel-heading">
                 <div>
                     <p class="eyebrow">match detail</p>
@@ -130,7 +146,6 @@ pub(in crate::server) fn render_game_fragment(
                 </div>
                 {}
             </div>"#,
-        html_escape(game_id),
         html_escape(game_type),
         html_escape(game_id),
         render_status_badge(status)
@@ -152,7 +167,7 @@ pub(in crate::server) fn render_game_fragment(
                 }
             };
             html.push_str(&format!("<div class=\"empty\">{}</div>", message));
-            if let Some(event) = latest_event {
+            if let Some(event) = events.last() {
                 if let Some(latest_state) = event.state() {
                     html.push_str(&render_human_state(game_type, agents, latest_state));
                 } else if let GameEvent::Error { message, .. } = event {
@@ -165,8 +180,24 @@ pub(in crate::server) fn render_game_fragment(
         }
     }
 
+    let turns = match result {
+        Some(result) => result
+            .stats()
+            .turns
+            .iter()
+            .map(|turn| &turn.state_after)
+            .collect(),
+        None => events.iter().filter_map(GameEvent::state).collect(),
+    };
+    BattleLog {
+        game_id,
+        turns,
+        live,
+    }
+    .render_into(&mut html)
+    .map_err(|error| AppError::Internal(error.to_string()))?;
     html.push_str("</div>");
-    html
+    Ok(html)
 }
 
 fn render_result_summary_line(result: &TestResult, agents: &[AIAgentConfig]) -> String {

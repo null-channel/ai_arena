@@ -115,7 +115,7 @@ ai_arena serve \
 
 Form changes are cached in memory while the server is running and reused as defaults for the next game.
 
-Open `http://127.0.0.1:3000/` to create games and watch session status. The legacy `--static-dir` option remains for static assets/prototypes, but the product UI is server-rendered HTMX.
+Open `http://127.0.0.1:3000/` to start a match, watch the board, and expand individual turns in the battle log. Axum serves the interface directly. New HTMX markup uses Askama templates in `templates/`. You can serve additional assets with `--static-dir`.
 
 ### DuckDB Run History
 

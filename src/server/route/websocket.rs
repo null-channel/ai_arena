@@ -105,14 +105,7 @@ async fn handle_game_socket(socket: WebSocket, state: AppState, game_id: String)
         let mut games = state_clone.games.lock().await;
         if let Some(session) = games.get_mut(&game_id_clone) {
             match result {
-                Ok(result) => {
-                    session.status = if result.error().is_some() {
-                        GameStatus::Error
-                    } else {
-                        GameStatus::Completed
-                    };
-                    session.result = Some(result);
-                }
+                Ok(result) => session.finish(result),
                 Err(_) => {
                     session.status = GameStatus::Error;
                     session.result = None;
@@ -126,7 +119,7 @@ async fn handle_game_socket(socket: WebSocket, state: AppState, game_id: String)
         {
             let mut games = state.games.lock().await;
             if let Some(session) = games.get_mut(&game_id) {
-                session.latest_event = Some(event.clone());
+                session.record_event(event.clone());
             }
         }
         let message_text = serde_json::to_string(&event).unwrap_or_else(|error| {

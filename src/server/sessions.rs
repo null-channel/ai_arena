@@ -9,6 +9,7 @@ use crate::{
 };
 use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 // Game session tracking
@@ -17,8 +18,29 @@ pub struct GameSession {
     pub game: Game,
     pub agents: Vec<AIAgentConfig>,
     pub status: GameStatus,
-    pub latest_event: Option<GameEvent>,
+    pub events: Arc<Vec<GameEvent>>,
     pub result: Option<TestResult>,
+}
+
+impl GameSession {
+    pub(super) fn record_event(&mut self, event: GameEvent) {
+        if self.result.is_some() {
+            self.events = Arc::default();
+        }
+        Arc::make_mut(&mut self.events).push(event);
+    }
+
+    pub(super) fn finish(&mut self, result: TestResult) {
+        self.status = if result.error().is_some() {
+            GameStatus::Error
+        } else {
+            GameStatus::Completed
+        };
+        self.result = Some(result);
+        // The result now supplies the battle log. Keep the last event for the JSON API.
+        let events = Arc::make_mut(&mut self.events);
+        events.drain(..events.len().saturating_sub(1));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,11 +118,11 @@ pub(super) async fn game_summaries(state: &AppState) -> Vec<GameSummary> {
 pub(super) async fn game_detail(
     state: &AppState,
     game_id: &str,
-) -> Result<(GameSummary, Option<GameEvent>), AppError> {
+) -> Result<(GameSummary, Arc<Vec<GameEvent>>), AppError> {
     if let Some(session) = state.games.lock().await.get(game_id) {
         return Ok((
             GameSummary::from_session(game_id, session),
-            session.latest_event.clone(),
+            session.events.clone(),
         ));
     }
     let run = state
@@ -109,7 +131,7 @@ pub(super) async fn game_detail(
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Game not found".to_string()))?;
-    Ok((run.into(), None))
+    Ok((run.into(), Arc::default()))
 }
 
 pub(super) async fn create_game_session(
@@ -139,7 +161,7 @@ pub(super) async fn create_game_session_with_metadata(
         game,
         agents,
         status: GameStatus::Pending,
-        latest_event: None,
+        events: Arc::default(),
         result: None,
     };
 
@@ -178,31 +200,15 @@ pub(super) async fn run_session(state: AppState, game_id: String) {
     let game_future =
         std::panic::AssertUnwindSafe(game.play_game(agents, Some(tx), Some(&secrets)))
             .catch_unwind();
-    tokio::pin!(game_future);
-    let mut result = None;
-
-    loop {
-        tokio::select! {
-            update = rx.recv() => {
-                if let Some(update) = update {
-                    let mut games = state.games.lock().await;
-                    if let Some(session) = games.get_mut(&game_id) {
-                        session.latest_event = Some(update);
-                    }
-                } else if result.is_some() {
-                    break;
-                }
-            }
-            completed = &mut game_future, if result.is_none() => {
-                result = Some(completed);
-                if rx.is_closed() {
-                    break;
-                }
+    let record_events = async {
+        while let Some(event) = rx.recv().await {
+            if let Some(session) = state.games.lock().await.get_mut(&game_id) {
+                session.record_event(event);
             }
         }
-    }
+    };
 
-    let final_result = result.expect("game future completes before session finalization");
+    let (final_result, ()) = tokio::join!(game_future, record_events);
     match &final_result {
         Ok(result) => {
             if let Err(error) = state.store.complete_run(&game_id, result).await {
@@ -223,14 +229,7 @@ pub(super) async fn run_session(state: AppState, game_id: String) {
     let mut games = state.games.lock().await;
     if let Some(session) = games.get_mut(&game_id) {
         match final_result {
-            Ok(result) => {
-                session.status = if result.error().is_some() {
-                    GameStatus::Error
-                } else {
-                    GameStatus::Completed
-                };
-                session.result = Some(result);
-            }
+            Ok(result) => session.finish(result),
             Err(_) => {
                 session.status = GameStatus::Error;
                 session.result = None;
