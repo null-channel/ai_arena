@@ -46,7 +46,7 @@ impl CsvTestCase {
                 "GEMINI" => Ok(AgentKind::Gemini),
                 "OLLAMA" => Ok(AgentKind::Ollama),
                 _ => Err(format!(
-                    "Invalid agent kind: {}. Must be OpenAI, Anthropic, Gemini, or Ollama",
+                    "Invalid agent kind: {}. Must be OpenAI, Anthropic, or Ollama",
                     value
                 )),
             }
@@ -159,8 +159,6 @@ pub async fn run_csv_batch<P: AsRef<Path>>(
     db_path: P,
 ) -> Result<(), String> {
     let test_cases = read_csv_file(csv_path)?;
-    let store = RunStore::new(db_path.as_ref().to_path_buf());
-    store.initialize().await?;
 
     println!("\n{}", "=".repeat(80));
     println!("CSV BATCH RUN");
@@ -178,11 +176,11 @@ pub async fn run_csv_batch<P: AsRef<Path>>(
         println!("Game: {}", test_case.game_name);
         println!("Repetitions: {}", test_case.repetitions);
         println!(
-            "Agents: {} ({}) vs {} ({})",
+            "Agents: {} ({:?}) vs {} ({:?})",
             test_case.agent_one_model,
-            format!("{:?}", test_case.agent_one_kind),
+            test_case.agent_one_kind,
             test_case.agent_two_model,
-            format!("{:?}", test_case.agent_two_kind)
+            test_case.agent_two_kind
         );
 
         let game = Game::from(test_case.game_name.as_str());
@@ -198,55 +196,24 @@ pub async fn run_csv_batch<P: AsRef<Path>>(
                     test_case.repetitions
                 );
             }
-            let run_id = store
-                .create_run(
-                    &game,
-                    &agents,
-                    Some(RunMetadata {
-                        source: Some("csv".to_string()),
-                        description: (!test_case.description.is_empty())
-                            .then(|| test_case.description.clone()),
-                        repetition: Some(rep + 1),
-                        matrix_job_id: None,
-                    }),
-                )
-                .await?;
-            store.mark_running(&run_id).await?;
 
-            let result = std::panic::AssertUnwindSafe(game.play_game(agents.clone(), None, None))
-                .catch_unwind()
-                .await;
-            match result {
-                Ok(result) => {
-                    store.complete_run(&run_id, &result).await?;
-                    completed_games += 1;
-                    if verbose || test_case.repetitions == 1 {
-                        print_game_stats(game.name(), &result);
-                    } else {
-                        // Brief summary for multiple repetitions
-                        let winner = match &result {
-                            TestResult::TicTacToe(r) => r.winner.as_ref(),
-                            TestResult::RockPaperScissors(r) => r.winner.as_ref(),
-                            TestResult::ConnectFour(r) => r.winner.as_ref(),
-                            TestResult::Chess(r) => r.winner.as_ref(),
-                            TestResult::Checkers(r) => r.winner.as_ref(),
-                            TestResult::Battleship(r) => r.winner.as_ref(),
-                        };
-                        println!(
-                            "  Result: {}",
-                            winner
-                                .map(|w| format!("Winner: {}", w))
-                                .unwrap_or_else(|| "Draw".to_string())
-                        );
-                    }
-                }
-                Err(_) => {
-                    store.mark_error(&run_id, "game execution panicked").await?;
-                    return Err(format!(
-                        "Game execution panicked; run {} marked as error",
-                        run_id
-                    ));
-                }
+            let result = game.play_game(agents.clone()).await;
+            completed_games += 1;
+            if verbose || test_case.repetitions == 1 {
+                print_game_stats(game.name(), &result);
+            } else {
+                // Brief summary for multiple repetitions
+                let winner = match &result {
+                    TestResult::TicTacToe(r) => r.winner.as_ref(),
+                    TestResult::RockPaperScissors(r) => r.winner.as_ref(),
+                    TestResult::ConnectFour(r) => r.winner.as_ref(),
+                };
+                println!(
+                    "  Result: {}",
+                    winner
+                        .map(|w| format!("Winner: {}", w))
+                        .unwrap_or_else(|| "Draw".to_string())
+                );
             }
         }
     }

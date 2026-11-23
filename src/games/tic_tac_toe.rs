@@ -44,22 +44,12 @@ impl Player {
         }
     }
 
-    fn to_string(&self) -> String {
-        self.as_str().to_string()
-    }
-
     fn other(&self) -> Player {
         match self {
             Player::X => Player::O,
             Player::O => Player::X,
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TicTacToeMove {
-    pub row: u32,
-    pub col: u32,
 }
 
 pub struct TicTacToe {
@@ -84,7 +74,7 @@ impl TicTacToe {
                 winner: None,
             },
             stats: GameStats::new(),
-            game_id: format!("ttt_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            game_id: format!("ttt_{}", &uuid::Uuid::new_v4().to_string()[..8]),
         }
     }
 
@@ -365,15 +355,19 @@ impl TicTacToe {
             .state
             .board
             .iter()
-            .map(|row| row.iter().map(|cell| cell.map(|p| p.to_string())).collect())
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.map(|p| p.as_str().to_owned()))
+                    .collect()
+            })
             .collect();
 
         json!({
             "board": board,
-            "current_player": self.state.current_player.to_string(),
+            "current_player": self.state.current_player.as_str(),
             "turn_number": self.state.turn_number,
             "game_over": self.state.game_over,
-            "winner": self.state.winner.map(|p| p.to_string()),
+            "winner": self.state.winner.map(|p| p.as_str().to_owned()),
             "board_size": self.config.board_size,
             "win_length": self.config.win_length,
         })
@@ -398,12 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn test_player_to_string() {
-        assert_eq!(Player::X.to_string(), "X");
-        assert_eq!(Player::O.to_string(), "O");
-    }
-
-    #[test]
     fn test_player_other() {
         assert_eq!(Player::X.other(), Player::O);
         assert_eq!(Player::O.other(), Player::X);
@@ -418,7 +406,7 @@ mod tests {
         assert_eq!(game.state.board[0].len(), 3);
         assert_eq!(game.state.current_player, Player::X);
         assert_eq!(game.state.turn_number, 0);
-        assert_eq!(game.state.game_over, false);
+        assert!(!game.state.game_over);
         assert_eq!(game.state.winner, None);
     }
 

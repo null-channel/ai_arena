@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(stats.total_duration_ms, 0);
         assert_eq!(stats.invalid_moves, 0);
         assert_eq!(stats.winner, None);
-        assert_eq!(stats.draw, false);
+        assert!(!stats.draw);
     }
 
     #[test]

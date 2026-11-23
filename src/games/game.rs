@@ -2,11 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_config::{AIAgentConfig, build_agents};
 
-use super::battleship::{Battleship, BattleshipConfig as GameBattleshipConfig, BattleshipResult};
-use super::checkers::{Checkers, CheckersConfig as GameCheckersConfig, CheckersResult};
-use super::chess::{Chess, ChessConfig as GameChessConfig, ChessResult};
 use super::connect_four::{ConnectFour, ConnectFourConfig as GameConnectFourConfig};
-use super::events::GameEvent;
 use super::rock_paper_scissors::{
     RockPaperScissors, RockPaperScissorsConfig as GameRockPaperScissorsConfig,
 };
@@ -38,6 +34,7 @@ pub struct TicTacToeConfig {
     pub board_size: u32,
     pub win_length: u32,
     #[serde(default)]
+    #[allow(dead_code)]
     pub order: PlayerOrder,
 }
 
@@ -55,6 +52,7 @@ impl Default for TicTacToeConfig {
 pub struct RockPaperScissorsConfig {
     pub rounds: u32,
     #[serde(default)]
+    #[allow(dead_code)]
     pub order: PlayerOrder,
 }
 
@@ -73,6 +71,7 @@ pub struct ConnectFourConfig {
     pub cols: u32,
     pub win_length: u32,
     #[serde(default)]
+    #[allow(dead_code)]
     pub order: PlayerOrder,
 }
 
@@ -182,16 +181,14 @@ impl From<&str> for Game {
 }
 
 impl Game {
+    #[allow(dead_code)]
     pub fn new(name: &str) -> Option<Self> {
-        match name.to_lowercase().as_str() {
-            "tictactoe" => Some(Game::TicTacToe(TicTacToeConfig::default())),
-            "rockpaperscissors" => {
+        match name {
+            "TicTacToe" => Some(Game::TicTacToe(TicTacToeConfig::default())),
+            "RockPaperScissors" => {
                 Some(Game::RockPaperScissors(RockPaperScissorsConfig::default()))
             }
-            "connectfour" => Some(Game::ConnectFour(ConnectFourConfig::default())),
-            "chess" => Some(Game::Chess(ChessConfig::default())),
-            "checkers" => Some(Game::Checkers(CheckersConfig::default())),
-            "battleship" => Some(Game::Battleship(BattleshipConfig::default())),
+            "ConnectFour" => Some(Game::ConnectFour(ConnectFourConfig::default())),
             _ => None,
         }
     }
@@ -221,7 +218,7 @@ impl Game {
                     win_length: config.win_length,
                 };
                 let game = TicTacToe::new(game_config);
-                let result = game.play_game(agents, observer.clone()).await;
+                let result = game.play_game(agents).await;
 
                 TestResult::TicTacToe(TicTacToeResult {
                     winner: result.winner.clone(),
@@ -235,7 +232,7 @@ impl Game {
                     rounds: config.rounds,
                 };
                 let game = RockPaperScissors::new(game_config);
-                let result = game.play_game(agents, observer.clone()).await;
+                let result = game.play_game(agents).await;
 
                 TestResult::RockPaperScissors(RockPaperScissorsResult {
                     winner: result.winner.clone(),
@@ -251,7 +248,7 @@ impl Game {
                     win_length: config.win_length,
                 };
                 let game = ConnectFour::new(game_config);
-                let result = game.play_game(agents, observer.clone()).await;
+                let result = game.play_game(agents).await;
 
                 TestResult::ConnectFour(ConnectFourResult {
                     winner: result.winner.clone(),
@@ -363,10 +360,7 @@ mod tests {
             Game::new("ConnectFour"),
             Some(Game::ConnectFour(_))
         ));
-        assert!(matches!(Game::new("Chess"), Some(Game::Chess(_))));
-        assert!(matches!(Game::new("Checkers"), Some(Game::Checkers(_))));
-        assert!(matches!(Game::new("Battleship"), Some(Game::Battleship(_))));
-        assert_eq!(Game::new("InvalidGame"), None);
+        assert!(Game::new("InvalidGame").is_none());
     }
 
     #[test]

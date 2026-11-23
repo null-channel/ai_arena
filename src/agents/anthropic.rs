@@ -1,14 +1,11 @@
-use rig::completion::Prompt;
-use rig::prelude::*;
 use rig::{agent::Agent, providers::anthropic::completion::CompletionModel};
-use serde_json::Value;
 
 use crate::agent::{AgentError, AgentResult, MoveRequest, MoveResponse};
 use crate::agents::prompt;
 
 pub struct AnthropicAgent {
     name: String,
-    model: String,
+    #[allow(dead_code)]
     agent: Agent<CompletionModel>,
     custom_prompt: Option<String>,
 }

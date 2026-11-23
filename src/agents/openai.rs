@@ -27,7 +27,6 @@ impl OpenAIAgent {
         name: impl Into<String>,
         model: impl Into<String>,
         api_key: impl Into<String>,
-        custom_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
         let api_key = api_key.into();
         // Create config with the API key directly - no environment variable manipulation needed
@@ -77,7 +76,7 @@ impl OpenAIAgent {
 
         let content = resp
             .choices
-            .get(0)
+            .first()
             .and_then(|c| c.message.content.as_deref())
             .ok_or_else(|| AgentError::InvalidResponse("missing content".into()))?;
 

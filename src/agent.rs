@@ -22,6 +22,7 @@ pub struct MoveResponse {
 
 #[derive(Debug)]
 pub enum AgentError {
+    #[allow(dead_code)]
     InvalidRequest(String),
     InvalidResponse(String),
     Internal(String),
@@ -40,6 +41,7 @@ impl std::fmt::Display for AgentError {
 impl std::error::Error for AgentError {}
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

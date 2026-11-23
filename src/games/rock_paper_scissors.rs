@@ -33,10 +33,6 @@ impl Choice {
         }
     }
 
-    fn to_string(&self) -> String {
-        self.as_str().to_string()
-    }
-
     fn beats(&self, other: Choice) -> bool {
         matches!(
             (self, other),
@@ -83,7 +79,7 @@ impl RockPaperScissors {
                 game_over: false,
             },
             stats: GameStats::new(),
-            game_id: format!("rps_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            game_id: format!("rps_{}", &uuid::Uuid::new_v4().to_string()[..8]),
         }
     }
 
@@ -320,8 +316,8 @@ impl RockPaperScissors {
             .map(|r| {
                 json!({
                     "round_number": r.round_number,
-                    "player_one_choice": r.player_one_choice.map(|c| c.to_string()),
-                    "player_two_choice": r.player_two_choice.map(|c| c.to_string()),
+                    "player_one_choice": r.player_one_choice.map(|c| c.as_str().to_owned()),
+                    "player_two_choice": r.player_two_choice.map(|c| c.as_str().to_owned()),
                     "winner": r.winner,
                 })
             })
@@ -358,13 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn test_choice_to_string() {
-        assert_eq!(Choice::Rock.to_string(), "rock");
-        assert_eq!(Choice::Paper.to_string(), "paper");
-        assert_eq!(Choice::Scissors.to_string(), "scissors");
-    }
-
-    #[test]
     fn test_choice_beats() {
         // Rock beats Scissors
         assert!(Choice::Rock.beats(Choice::Scissors));
@@ -393,7 +382,7 @@ mod tests {
         assert_eq!(game.state.player_one_score, 0);
         assert_eq!(game.state.player_two_score, 0);
         assert_eq!(game.state.round_history.len(), 0);
-        assert_eq!(game.state.game_over, false);
+        assert!(!game.state.game_over);
     }
 
     #[test]

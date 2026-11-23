@@ -46,10 +46,6 @@ impl Player {
         }
     }
 
-    fn to_string(&self) -> String {
-        self.as_str().to_string()
-    }
-
     fn other(&self) -> Player {
         match self {
             Player::Red => Player::Yellow,
@@ -81,7 +77,7 @@ impl ConnectFour {
                 winner: None,
             },
             stats: GameStats::new(),
-            game_id: format!("c4_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+            game_id: format!("c4_{}", &uuid::Uuid::new_v4().to_string()[..8]),
         }
     }
 
@@ -362,15 +358,19 @@ impl ConnectFour {
             .state
             .board
             .iter()
-            .map(|row| row.iter().map(|cell| cell.map(|p| p.to_string())).collect())
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.map(|p| p.as_str().to_owned()))
+                    .collect()
+            })
             .collect();
 
         json!({
             "board": board,
-            "current_player": self.state.current_player.to_string(),
+            "current_player": self.state.current_player.as_str(),
             "turn_number": self.state.turn_number,
             "game_over": self.state.game_over,
-            "winner": self.state.winner.map(|p| p.to_string()),
+            "winner": self.state.winner.map(|p| p.as_str().to_owned()),
             "rows": self.config.rows,
             "cols": self.config.cols,
             "win_length": self.config.win_length,
@@ -396,12 +396,6 @@ mod tests {
     }
 
     #[test]
-    fn test_player_to_string() {
-        assert_eq!(Player::Red.to_string(), "Red");
-        assert_eq!(Player::Yellow.to_string(), "Yellow");
-    }
-
-    #[test]
     fn test_player_other() {
         assert_eq!(Player::Red.other(), Player::Yellow);
         assert_eq!(Player::Yellow.other(), Player::Red);
@@ -416,7 +410,7 @@ mod tests {
         assert_eq!(game.state.board[0].len(), 7);
         assert_eq!(game.state.current_player, Player::Red);
         assert_eq!(game.state.turn_number, 0);
-        assert_eq!(game.state.game_over, false);
+        assert!(!game.state.game_over);
         assert_eq!(game.state.winner, None);
     }
 

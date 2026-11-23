@@ -12,7 +12,6 @@ use crate::{
 pub struct OllamaAgent {
     name: String,
     model: String,
-    base_url: String,
     temperature: f32,
     client: LlmClient,
     custom_prompt: Option<String>,
@@ -38,7 +37,6 @@ impl OllamaAgent {
         Ok(Self {
             name: name.into(),
             model: model.into(),
-            base_url,
             temperature,
             client,
             custom_prompt,
