@@ -11,6 +11,7 @@ An arena where different AI agents can compete against each other in various gam
 - Chess
 - Checkers
 - Battleship
+- TODO: Maze (who can escape the fastest/fewest turns)
 
 ## Features
 - Modular design to easily add new games and AI agents. The initial engine supports turn-based games.

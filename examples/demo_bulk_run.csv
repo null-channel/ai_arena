@@ -1,0 +1,8 @@
+game_name,agent_one_kind,agent_one_model,agent_one_temp,agent_one_seed,agent_one_secret_profile,agent_one_api_endpoint,agent_one_prompt_file,agent_two_kind,agent_two_model,agent_two_temp,agent_two_seed,agent_two_secret_profile,agent_two_api_endpoint,agent_two_prompt_file,repetitions,description
+TicTacToe,Ollama,llama3,0.2,1001,,http://localhost:11434,,Ollama,llama3,0.2,2001,,http://localhost:11434,,50,Low-temperature TicTacToe baseline
+TicTacToe,Ollama,llama3,0.8,1002,,http://localhost:11434,,Ollama,llama3,0.8,2002,,http://localhost:11434,,50,Higher-temperature TicTacToe comparison
+RockPaperScissors,Ollama,llama3,0.5,1101,,http://localhost:11434,,Ollama,llama3,0.5,2101,,http://localhost:11434,,50,Rock Paper Scissors reliability sample
+ConnectFour,Ollama,llama3,0.4,1201,,http://localhost:11434,,Ollama,llama3,0.7,2201,,http://localhost:11434,,20,Connect Four temperature comparison
+Checkers,Ollama,llama3,0.4,1301,,http://localhost:11434,,Ollama,llama3,0.7,2301,,http://localhost:11434,,10,Checkers bulk sample
+Battleship,Ollama,llama3,0.4,1401,,http://localhost:11434,,Ollama,llama3,0.7,2401,,http://localhost:11434,,10,Battleship bulk sample
+Chess,Ollama,llama3,0.3,1501,,http://localhost:11434,,Ollama,llama3,0.6,2501,,http://localhost:11434,,5,Chess long-game sample

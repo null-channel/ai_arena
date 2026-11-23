@@ -24,6 +24,20 @@ pub enum AgentKind {
     Ollama,
 }
 
+impl std::str::FromStr for AgentKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "OpenAI" => Ok(Self::OpenAI),
+            "Anthropic" => Ok(Self::Anthropic),
+            "Gemini" => Ok(Self::Gemini),
+            "Ollama" => Ok(Self::Ollama),
+            _ => Err(format!("Unsupported agent kind: {value}")),
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, clap::Args)]
 pub struct AIAgentConfig {
     pub model: String,
@@ -121,7 +135,7 @@ pub fn build_agents(configs: Vec<AIAgentConfig>, secrets: Option<&SecretsManager
                         .expect("Failed to resolve Anthropic API key (check secrets or ANTHROPIC_API_KEY env var)");
 
                     AIAgent::Anthropic(
-                        AnthropicAgent::new(&name, &cfg.model, &key, cfg.temp, custom_prompt)
+                        AnthropicAgent::new(&name, &cfg.model, &key, custom_prompt)
                             .expect("create anthropic agent"),
                     )
                 }

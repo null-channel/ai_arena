@@ -1,0 +1,2 @@
+game_name,agent_one_kind,agent_one_model,agent_one_temp,agent_one_seed,agent_two_kind,agent_two_model,agent_two_temp,agent_two_seed,repetitions,description
+Chess,OpenAI,gpt-4o-mini,0.7,1,OpenAI,gpt-4o-mini,0.7,2,1,Chess Test Run

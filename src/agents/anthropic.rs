@@ -22,7 +22,6 @@ impl AnthropicAgent {
         name: impl Into<String>,
         model: impl Into<String>,
         api_key: impl Into<String>,
-        _temperature: f32,
         custom_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
         let name = name.into();
@@ -84,7 +83,7 @@ mod tests {
         // We don't expect this to actually connect to Anthropic without a valid key,
         // but we can verify the struct is built correctly if the client creation is lazy.
         // If client creation is eager and validates key, this might fail, but let's try.
-        let result = AnthropicAgent::new("test_agent", "claude-3-opus", "test_key", 0.7, None);
+        let result = AnthropicAgent::new("test_agent", "claude-3-opus", "test_key", None);
 
         // rig client might not validate key immediately.
         if let Ok(agent) = result {
