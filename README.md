@@ -77,13 +77,13 @@ The CLI prints each stored turn and its resulting board state. Completed runs al
 
 ### Matrix Runs
 
-The arena control room can launch a repeated matchup with a configurable concurrency limit. Each simulation receives its own run ID, persists its turns in DuckDB, and links to its live observer or replay page. The JSON API accepts the same configuration:
+Multi repeats one matchup. Matrix schedules every unordered pair of roster entries for the chosen number of matches per pair. Three agents at three matches per pair produce nine matches. The earlier roster entry plays in the first seat. Each batch supports up to 1,000 total matches and configurable concurrency. Each simulation receives its own run ID, persists its turns in DuckDB, and links to its live observer or replay page. The JSON API accepts the same configuration:
 
 ```json
 POST /api/matrix
 {
   "game_type": "TicTacToe",
-  "agents": [/* two agent configurations */],
+  "agents": [/* two or more agent configurations */],
   "repetitions": 100,
   "concurrency_limit": 4
 }
@@ -115,7 +115,7 @@ ai_arena serve \
 
 Form changes are cached in memory while the server is running and reused as defaults for the next game.
 
-Open `http://127.0.0.1:3000/` to start a match, watch the board, and expand individual turns in the battle log. Axum serves the interface directly. New HTMX markup uses Askama templates in `templates/`. You can serve additional assets with `--static-dir`.
+Open `http://127.0.0.1:3000/` to choose Single, Multi, or Matrix. All three modes accept custom model names. The provider and model determine which settings appear. For example, Ollama exposes its endpoint and temperature, while Anthropic uses the model’s sampling defaults. Axum serves the UI and its assets directly.
 
 ### DuckDB Run History
 
@@ -124,7 +124,11 @@ All game runs are stored in DuckDB. By default the database file is `./ai_arena.
 The web UI keeps active sessions in memory for live polling, then reads completed and failed run history back from DuckDB so previous runs remain visible after a server restart.
 
 **HTMX routes:**
-- `GET /` — arena control room
+- `GET /` — single-match setup and live matches
+- `GET /multi` and `GET /matrix` — setup and saved batches for each mode
+- `GET /multi/{id}` and `GET /matrix/{id}` — batch progress and links to every session
+- `GET /history?game=Chess` — per-game outcomes, turn counts, invalid moves, durations, and links to saved matches
+- `GET /rankings?game=Chess` — model leaderboard for the selected game (defaults to Tic-tac-toe). Expand a model to see its record against each opponent.
 - `POST /games/start` — create and launch a game from a form
 - `POST /games/defaults` — cache form defaults in memory
 - `GET /games` — session list fragment
@@ -141,7 +145,7 @@ The web UI keeps active sessions in memory for live polling, then reads complete
 - `GET /api/runs/{id}/events` — ordered persisted turns
 - `POST /api/matrix` — start a bounded-parallel matrix job
 - `GET /api/matrix/{id}` — matrix progress and child run IDs
-- `GET /api/leaderboard` — model wins, losses, draws, and turn-quality aggregates
+- `GET /api/leaderboard?game=Chess` — model wins, losses, draws, turn-quality aggregates, and head-to-head records for one game. Omit `game` for combined rankings.
 - `GET /api/secrets` — list secret profile names
 - `WS /ws/games/{id}` — watch a pending game run
 

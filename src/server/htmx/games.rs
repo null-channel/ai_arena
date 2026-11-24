@@ -21,11 +21,23 @@ struct BattleLog<'a> {
     live: bool,
 }
 
-pub(in crate::server) fn render_game_page(fragment: &str) -> String {
+pub(in crate::server) fn render_game_page(
+    fragment: &str,
+    parent: Option<(String, String)>,
+) -> String {
+    let (href, label) = match parent {
+        Some((mode, id)) if mode == "multi" => {
+            (format!("/multi/{}", html_escape(&id)), "Multi sessions")
+        }
+        Some((mode, id)) if mode == "matrix" => {
+            (format!("/matrix/{}", html_escape(&id)), "Matrix sessions")
+        }
+        _ => ("/".into(), "Console"),
+    };
     let content = format!(
         r#"
         <main class="stack">
-            <a class="back-link" href="/">← Back to arena</a>
+            <a class="back-link" href="{href}">← {label}</a>
             <section class="panel">{fragment}</section>
         </main>
         "#,
@@ -33,85 +45,21 @@ pub(in crate::server) fn render_game_page(fragment: &str) -> String {
     layout("AI Arena Game", &content)
 }
 
-pub(in crate::server) fn render_game_started(game_id: &str, games_fragment: &str) -> String {
-    format!(
-        r#"
-                    <div id="start-form">
-                        <div class="notice success">
-                            <strong>Match launched.</strong>
-                            <span>Game <code>{}</code> is running in the arena.</span>
-                            <a class="button small" href="/games/{}">Watch game</a>
-                        </div>
-                    </div>
-                    <div id="session-list" hx-swap-oob="true">
-                        {}
-                    </div>
-                    "#,
-        html_escape(game_id),
-        html_escape(game_id),
-        games_fragment
-    )
-}
-
 pub(in crate::server) fn render_games_fragment(sessions: &[GameSummary]) -> String {
-    let mut html = format!(
-        "<div id=\"session-list\"><span data-session-count hidden>{}</span>",
-        sessions.len()
-    );
-
+    let mut html = String::from(r#"<div id="session-list">"#);
     if sessions.is_empty() {
-        html.push_str(
-            "<div class=\"empty\">No games yet. Configure a match and start the arena.</div>",
-        );
-    } else {
-        html.push_str("<div class=\"sessions\">");
-        for GameSummary {
-            game_id,
-            game_type,
-            agents,
-            status,
-            result,
-        } in sessions
-        {
-            let replay_link = result
-                .as_ref()
-                .map(|_| {
-                    format!(
-                        "<a class=\"button small ghost\" href=\"/games/{}/replay\">Replay</a>",
-                        html_escape(game_id)
-                    )
-                })
-                .unwrap_or_default();
-            let summary = result
-                .as_ref()
-                .map(|result| render_result_summary_line(result, agents))
-                .unwrap_or_else(|| match status {
-                    GameStatus::Error => "Run failed before producing a result".to_string(),
-                    _ => "Awaiting result".to_string(),
-                });
-            html.push_str(&format!(
-                r#"<article class="session-card">
-                    <div class="session-top">
-                        <div>
-                            <h3>{}</h3>
-                            <div class="session-id">{}</div>
-                        </div>
-                        {}
-                    </div>
-                    <p>{}</p>
-                    <div class="actions"><a class="button small" href="/games/{}">Observe</a>{}</div>
-                </article>"#,
-                html_escape(game_type),
-                html_escape(game_id),
-                render_status_badge(status),
-                html_escape(&summary),
-                html_escape(game_id),
-                replay_link,
-            ));
-        }
-        html.push_str("</div>");
+        html.push_str(r#"<div class="empty"><span class="idle-icon" aria-hidden="true">◌</span><strong>No active matches</strong><p>Matches appear here while they play.</p></div>"#);
     }
-
+    for game in sessions {
+        let matchup = game
+            .agents
+            .iter()
+            .map(|a| html_escape(&a.model))
+            .collect::<Vec<_>>()
+            .join(" vs ");
+        html.push_str(&format!(r#"<article class="session-card"><div class="session-top"><h3>{}</h3>{}</div><p>{matchup}</p><a href="/games/{}">Observe match →</a></article>"#,
+            html_escape(&game.game_type), render_status_badge(&game.status), html_escape(&game.game_id)));
+    }
     html.push_str("</div>");
     html
 }
@@ -156,7 +104,12 @@ pub(in crate::server) fn render_game_fragment(
     }
 
     match result {
-        Some(result) => html.push_str(&render_result_detail(game_type, agents, result)),
+        Some(result) => {
+            html.push_str(&render_result_detail(game_type, agents, result));
+            if !result.stats().turns.is_empty() {
+                html.push_str(&format!(r#"<p class="actions"><a class="button" href="/games/{}/replay">Replay match</a></p>"#, html_escape(game_id)));
+            }
+        }
         None => {
             let message = match status {
                 GameStatus::Pending => "This game is queued and will start shortly.",
@@ -200,23 +153,6 @@ pub(in crate::server) fn render_game_fragment(
     Ok(html)
 }
 
-fn render_result_summary_line(result: &TestResult, agents: &[AIAgentConfig]) -> String {
-    let (stats, error) = result_stats(result);
-    if let Some(error) = error {
-        return format!("Error: {}", error);
-    }
-
-    match &stats.winner {
-        Some(winner) => format!(
-            "Winner: {} after {} turns",
-            display_winner(winner, agents),
-            stats.total_turns()
-        ),
-        None if stats.draw => format!("Draw after {} turns", stats.total_turns()),
-        None => format!("Incomplete after {} turns", stats.total_turns()),
-    }
-}
-
 fn render_result_detail(game_type: &str, agents: &[AIAgentConfig], result: &TestResult) -> String {
     let (stats, error) = result_stats(result);
     let outcome = if let Some(error) = error {
@@ -242,10 +178,6 @@ fn render_result_detail(game_type: &str, agents: &[AIAgentConfig], result: &Test
         stats.average_turn_time_ms()
     );
 
-    if agents.len() >= 2 {
-        html.push_str(&render_player_legend(game_type, agents));
-    }
-
     if let Some(last_turn) = stats.turns.last() {
         html.push_str(&render_human_state(
             game_type,
@@ -255,7 +187,7 @@ fn render_result_detail(game_type: &str, agents: &[AIAgentConfig], result: &Test
     }
 
     if !stats.turns.is_empty() {
-        html.push_str("<h3>Turn Log</h3><table><thead><tr><th>Turn</th><th>Player</th><th>Move</th><th>Time</th><th>Status</th></tr></thead><tbody>");
+        html.push_str("<h3>Turn Log</h3><table><thead><tr><th>Turn</th><th>Agent</th><th>Move</th><th>Time</th><th>Status</th></tr></thead><tbody>");
         for turn in stats.turns.iter().rev().take(12).rev() {
             html.push_str(&format!(
                 "<tr><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}ms</td><td>{}</td></tr>",

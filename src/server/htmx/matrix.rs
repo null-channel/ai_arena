@@ -1,57 +1,74 @@
-use super::layout::{html_escape, render_status_badge};
-use crate::server::{
-    jobs::{MatrixJobResponse, MatrixStatus},
-    sessions::GameStatus,
+use super::layout::{html_escape, layout, render_status_badge};
+use crate::{
+    server::{config::RunMode, sessions::GameStatus},
+    storage::{BatchSession, BatchSummary},
 };
+use std::fmt::Write;
 
-pub(in crate::server) fn render_matrix_started(
-    job: &MatrixJobResponse,
-    matrix_fragment: &str,
-) -> String {
-    format!(
-        r#"<div id="matrix-form"><div class="notice success"><strong>Matrix launched.</strong><span>{} runs with a concurrency limit of {}.</span></div></div><div id="matrix-list" hx-swap-oob="true">{}</div>"#,
-        job.total, job.concurrency_limit, matrix_fragment,
-    )
+pub(in crate::server) fn render_batch_activity(mode: RunMode, batches: &[BatchSummary]) -> String {
+    if batches.is_empty() {
+        return "<div class=\"empty\">No batches yet.</div>".into();
+    }
+    let mut html = String::new();
+    for batch in batches {
+        write!(html, r#"<a class="recent-run" href="{}/{}"><strong>{}</strong><small>{} of {} sessions finished · {}</small></a>"#,
+            mode.path(), html_escape(&batch.id), html_escape(&batch.game_type), batch.finished,
+            batch.total, html_escape(&batch.id.chars().take(8).collect::<String>())).unwrap();
+    }
+    html
 }
 
-pub(in crate::server) fn render_matrix_fragment(jobs: &[MatrixJobResponse]) -> String {
-    let mut html = String::from("<div id=\"matrix-list\">");
-    if jobs.is_empty() {
-        html.push_str("<div class=\"empty\">No matrix jobs yet.</div>");
+pub(in crate::server) fn render_batch_page(
+    mode: RunMode,
+    id: &str,
+    game: &str,
+    sessions: &[BatchSession],
+    tracked: bool,
+) -> String {
+    let id = html_escape(id);
+    let path = mode.path();
+    let label = mode.label();
+    let finished = sessions
+        .iter()
+        .filter(|s| matches!(s.status.as_str(), "completed" | "error"))
+        .count();
+    let poll = if tracked && finished < sessions.len() {
+        format!(
+            r##" hx-get="{path}/{id}" hx-trigger="every 2s" hx-select="#batch-sessions" hx-swap="outerHTML""##
+        )
+    } else {
+        String::new()
+    };
+    let mut rows = String::new();
+    for (index, session) in sessions.iter().enumerate() {
+        let models = session
+            .agents
+            .iter()
+            .map(|a| html_escape(&a.model))
+            .collect::<Vec<_>>()
+            .join(" vs ");
+        let status = GameStatus::from_storage(&session.status);
+        let run = html_escape(&session.id);
+        let replay = if matches!(status, GameStatus::Completed) {
+            format!(r#"<a href="/games/{run}/replay">Replay</a>"#)
+        } else {
+            String::new()
+        };
+        let badge = if !tracked && matches!(status, GameStatus::Pending | GameStatus::Running) {
+            r#"<span class="badge error">Interrupted</span>"#.into()
+        } else {
+            render_status_badge(&status)
+        };
+        write!(rows, r#"<tr><td><a href="/games/{run}">Session {}</a></td><td>{models}</td><td>{}</td><td>{badge}</td><td>{replay}</td></tr>"#,
+            index + 1, session.repetition.map(|r| r.to_string()).unwrap_or_else(|| "—".into())).unwrap();
     }
-    for job in jobs {
-        html.push_str(&format!(
-            "<article class=\"session-card\"><div class=\"session-top\"><div><h3>{}</h3><div class=\"session-id\">{}</div></div><span class=\"badge {}\">{:?}</span></div><p>{}/{} complete · {} running · {} queued · {} failed · concurrency {}</p><div class=\"matrix-runs\">",
-            html_escape(&job.game_type),
-            html_escape(&job.matrix_id),
-            match job.status { MatrixStatus::Queued => "pending", MatrixStatus::Running => "running", MatrixStatus::Completed => "completed" },
-            job.status,
-            job.completed + job.failed,
-            job.total,
-            job.running,
-            job.queued,
-            job.failed,
-            job.concurrency_limit,
-        ));
-        for run in &job.runs {
-            let replay = if matches!(run.status, GameStatus::Completed) {
-                format!(
-                    "<a href=\"/games/{}/replay\">Replay</a>",
-                    html_escape(&run.run_id)
-                )
-            } else {
-                String::new()
-            };
-            html.push_str(&format!(
-                "<div><code>{}</code> {} <a href=\"/games/{}\">Observe</a> {}</div>",
-                html_escape(&run.run_id),
-                render_status_badge(&run.status),
-                html_escape(&run.run_id),
-                replay,
-            ));
-        }
-        html.push_str("</div></article>");
-    }
-    html.push_str("</div>");
-    html
+    let content = format!(
+        r#"<main class="stack"><a class="back-link" href="{path}">← {label} setup</a>
+        <div class="page-heading"><h1>{label} · {}</h1><p class="session-id">{id}</p></div>
+        <section class="panel" id="batch-sessions"{poll}><div class="panel-heading"><h2>Sessions</h2><span>{finished} of {} finished</span></div>
+        <div class="table-scroll"><table><thead><tr><th>Session</th><th>Matchup</th><th>Round</th><th>Status</th><th>Replay</th></tr></thead><tbody>{rows}</tbody></table></div></section></main>"#,
+        html_escape(game),
+        sessions.len()
+    );
+    layout(label, &content)
 }

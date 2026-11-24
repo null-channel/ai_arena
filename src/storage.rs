@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -30,6 +30,29 @@ pub struct StoredRun {
     pub matrix_job_id: Option<String>,
 }
 
+pub struct BatchSummary {
+    pub id: String,
+    pub game_type: String,
+    pub total: i64,
+    pub finished: i64,
+}
+
+pub struct BatchResult {
+    pub id: String,
+    pub total: i64,
+    pub draws: i64,
+    pub failed: i64,
+    pub finished_at: String,
+}
+
+pub struct BatchSession {
+    pub id: String,
+    pub game_type: String,
+    pub agents: Vec<AIAgentConfig>,
+    pub status: String,
+    pub repetition: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoredTurn {
     pub sequence: u64,
@@ -46,14 +69,57 @@ pub struct LeaderboardEntry {
     pub draws: u32,
     pub invalid_moves: u32,
     pub average_turn_time_ms: f64,
+    pub opponents: BTreeMap<String, MatchRecord>,
+}
+
+pub const HISTORY_PAGE_SIZE: u32 = 25;
+
+#[derive(Default)]
+pub struct GameHistory {
+    pub completed: i64,
+    pub failed: i64,
+    pub draws: i64,
+    pub avg_duration_ms: Option<f64>,
+    pub runs: Vec<RunMetrics>,
+}
+
+pub struct RunMetrics {
+    pub id: String,
+    pub listed_at: String,
+    pub agents: Vec<AIAgentConfig>,
+    pub outcome: String,
+    pub turns: Option<i64>,
+    pub invalid_moves: Option<i64>,
+    pub duration_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct MatchRecord {
+    pub games: u32,
+    pub wins: u32,
+    pub losses: u32,
+    pub draws: u32,
+}
+
+impl MatchRecord {
+    fn add_appearance(&mut self, player: usize, winner: Option<usize>, draw: bool) {
+        self.games += 1;
+        if draw {
+            self.draws += 1;
+        } else if let Some(winner) = winner {
+            if player == winner {
+                self.wins += 1;
+            } else {
+                self.losses += 1;
+            }
+        }
+    }
 }
 
 #[derive(Default)]
 struct LeaderboardAccumulator {
-    games: u32,
-    wins: u32,
-    losses: u32,
-    draws: u32,
+    record: MatchRecord,
+    opponents: BTreeMap<String, MatchRecord>,
     invalid_moves: u32,
     total_turn_time_ms: u64,
     turns: u32,
@@ -73,7 +139,7 @@ pub trait GameStorage: Send + Sync {
     async fn list_events(&self, run_id: &str) -> Result<Vec<StoredTurn>, String>;
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -122,41 +188,40 @@ impl RunStore {
         agents: &[AIAgentConfig],
         metadata: Option<RunMetadata>,
     ) -> Result<String, String> {
-        let run_id = Uuid::new_v4().to_string();
-        let game_type = game.name().to_string();
-        let agents_json = to_json_string(agents)?;
+        let ids = self
+            .create_runs(game, vec![(agents.to_vec(), metadata)])
+            .await?;
+        Ok(ids.into_iter().next().expect("one inserted run"))
+    }
+
+    pub async fn create_runs(
+        &self,
+        game: &Game,
+        runs: Vec<(Vec<AIAgentConfig>, Option<RunMetadata>)>,
+    ) -> Result<Vec<String>, String> {
+        let game_type = game.name().to_owned();
         let game_config_json = to_json_string(game)?;
-        let matrix_job_id = metadata
-            .as_ref()
-            .and_then(|metadata| metadata.matrix_job_id.clone());
-        let metadata_json = metadata
-            .map(|metadata| to_json_string(&metadata))
-            .transpose()?;
-        let created_at = now_timestamp();
-        let run_id_for_insert = run_id.clone();
-
-        self.with_connection(move |conn| {
+        self.with_connection(move |mut conn| {
             ensure_schema(&conn)?;
-            conn.execute(
-                "INSERT INTO runs (
-                    id, game_type, status, created_at, agents_json, game_config_json, matrix_job_id, metadata_json
-                ) VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    run_id_for_insert,
-                    game_type,
-                    created_at,
-                    agents_json,
-                    game_config_json,
-                    matrix_job_id,
-                    metadata_json
-                ],
-            )
-            .map_err(|err| err.to_string())?;
-            Ok(())
-        })
-        .await?;
-
-        Ok(run_id)
+            let tx = conn.transaction().map_err(|err| err.to_string())?;
+            let mut ids = Vec::with_capacity(runs.len());
+            {
+                let mut insert = tx.prepare("INSERT INTO runs (
+                    id, game_type, status, created_at, agents_json, game_config_json, matrix_job_id, metadata_json, batch_mode
+                ) VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?7, ?8)").map_err(|err| err.to_string())?;
+                for (agents, metadata) in runs {
+                    let id = Uuid::new_v4().to_string();
+                    let job_id = metadata.as_ref().and_then(|meta| meta.matrix_job_id.as_deref());
+                    insert.execute(params![id, game_type, now_timestamp(), to_json_string(&agents)?,
+                        game_config_json, job_id, metadata.as_ref().map(to_json_string).transpose()?,
+                        metadata.as_ref().filter(|_| job_id.is_some()).and_then(|m| m.source.as_deref())])
+                        .map_err(|err| err.to_string())?;
+                    ids.push(id);
+                }
+            }
+            tx.commit().map_err(|err| err.to_string())?;
+            Ok(ids)
+        }).await
     }
 
     pub async fn mark_running(&self, run_id: &str) -> Result<(), String> {
@@ -301,22 +366,158 @@ impl RunStore {
         .await
     }
 
-    pub async fn list_runs(&self) -> Result<Vec<StoredRun>, String> {
-        self.with_connection(|conn| {
+    pub async fn list_runs(&self, game: Option<&Game>) -> Result<Vec<StoredRun>, String> {
+        let game_type = game.map(|g| g.name().to_owned());
+        self.with_connection(move |conn| {
             ensure_schema(&conn)?;
             let mut statement = conn
                 .prepare(
                     "SELECT id, game_type, status, agents_json, result_json, matrix_job_id
                      FROM runs
-                     WHERE status IN ('completed', 'error')
+                     WHERE status IN ('completed', 'error') AND (?1 IS NULL OR game_type = ?1)
                      ORDER BY created_at DESC, id DESC",
                 )
                 .map_err(|err| err.to_string())?;
             let rows = statement
-                .query_map([], stored_run_from_row)
+                .query_map(params![game_type], stored_run_from_row)
                 .map_err(|err| err.to_string())?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|err| err.to_string())
+        })
+        .await
+    }
+
+    pub async fn list_batches(&self, mode: &str) -> Result<Vec<BatchSummary>, String> {
+        let mode = mode.to_owned();
+        self.with_connection(move |conn| {
+            ensure_schema(&conn)?;
+            // Older batches were all recorded as matrix jobs.
+            let mut query = conn.prepare(
+                "SELECT matrix_job_id, game_type, count(*), count(*) FILTER (WHERE status IN ('completed', 'error'))
+                 FROM runs WHERE matrix_job_id IS NOT NULL AND coalesce(batch_mode, 'matrix') = ?1
+                 GROUP BY matrix_job_id, game_type ORDER BY min(created_at) DESC, matrix_job_id"
+            ).map_err(|err| err.to_string())?;
+            let rows = query.query_map(params![mode], |row| Ok(BatchSummary {
+                id: row.get(0)?, game_type: row.get(1)?, total: row.get(2)?, finished: row.get(3)?,
+            })).map_err(|err| err.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|err| err.to_string())
+        }).await
+    }
+
+    pub async fn recent_batch_results(
+        &self,
+        mode: &str,
+        game: &Game,
+    ) -> Result<Vec<BatchResult>, String> {
+        let mode = mode.to_owned();
+        let game_type = game.name().to_owned();
+        self.with_connection(move |conn| {
+            ensure_schema(&conn)?;
+            let mut query = conn.prepare(
+                "WITH batches AS (
+                    SELECT matrix_job_id, count(*) AS total,
+                           count(*) FILTER (WHERE status = 'completed' AND draw) AS draws,
+                           count(*) FILTER (WHERE status = 'error') AS failed,
+                           max(coalesce(finished_at, created_at)) AS last_finish
+                    FROM runs WHERE game_type = ?1 AND matrix_job_id IS NOT NULL
+                          AND coalesce(batch_mode, 'matrix') = ?2
+                    GROUP BY matrix_job_id
+                    HAVING count(*) = count(*) FILTER (WHERE status IN ('completed', 'error'))
+                 )
+                 SELECT matrix_job_id, total, draws, failed,
+                        coalesce(strftime(epoch_ms(try_cast(try_cast(rtrim(last_finish, 'Z') AS DOUBLE) * 1000 AS BIGINT)),
+                                         '%Y-%m-%d %H:%M'), last_finish)
+                 FROM batches ORDER BY last_finish DESC, matrix_job_id DESC LIMIT 3"
+            ).map_err(|err| err.to_string())?;
+            let rows = query.query_map(params![game_type, mode], |row| Ok(BatchResult {
+                id: row.get(0)?, total: row.get(1)?, draws: row.get(2)?, failed: row.get(3)?, finished_at: row.get(4)?,
+            })).map_err(|err| err.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(|err| err.to_string())
+        }).await
+    }
+
+    pub async fn batch_sessions(&self, mode: &str, id: &str) -> Result<Vec<BatchSession>, String> {
+        let (mode, id) = (mode.to_owned(), id.to_owned());
+        self.with_connection(move |conn| {
+            ensure_schema(&conn)?;
+            let mut query = conn
+                .prepare(
+                    "SELECT id, game_type, status, agents_json, metadata_json FROM runs
+                 WHERE matrix_job_id = ?1 AND coalesce(batch_mode, 'matrix') = ?2
+                 ORDER BY created_at, rowid",
+                )
+                .map_err(|err| err.to_string())?;
+            let rows = query
+                .query_map(params![id, mode], |row| {
+                    let agents: String = row.get(3)?;
+                    let metadata: Option<String> = row.get(4)?;
+                    Ok(BatchSession {
+                        id: row.get(0)?,
+                        game_type: row.get(1)?,
+                        status: row.get(2)?,
+                        agents: serde_json::from_str(&agents).unwrap_or_default(),
+                        repetition: metadata
+                            .and_then(|v| serde_json::from_str::<RunMetadata>(&v).ok())
+                            .and_then(|m| m.repetition),
+                    })
+                })
+                .map_err(|err| err.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|err| err.to_string())
+        })
+        .await
+    }
+
+    pub async fn parent_batch(&self, run_id: &str) -> Result<Option<(String, String)>, String> {
+        let id = run_id.to_owned();
+        self.with_connection(move |conn| {
+            ensure_schema(&conn)?;
+            let mut query = conn.prepare(
+                "SELECT coalesce(batch_mode, 'matrix'), matrix_job_id FROM runs WHERE id = ?1 AND matrix_job_id IS NOT NULL"
+            ).map_err(|err| err.to_string())?;
+            let mut rows = query.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|err| err.to_string())?;
+            rows.next().transpose().map_err(|err| err.to_string())
+        }).await
+    }
+
+    pub async fn recent_single_results(&self, game: &Game) -> Result<Vec<RunMetrics>, String> {
+        let game_type = game.name().to_owned();
+        self.with_connection(move |conn| {
+            ensure_schema(&conn)?;
+            finished_run_metrics(&conn, &game_type, 3, 0, true)
+        })
+        .await
+    }
+
+    /// Page over scalar metrics without loading move logs or board snapshots.
+    pub async fn game_history(&self, game: &Game, page: u32) -> Result<GameHistory, String> {
+        let game_type = game.name().to_owned();
+        self.with_connection(move |conn| {
+            ensure_schema(&conn)?;
+            let mut history = conn
+                .query_row(
+                    "SELECT count(*) FILTER (WHERE status = 'completed'),
+                        count(*) FILTER (WHERE status = 'error'),
+                        count(*) FILTER (WHERE status = 'completed' AND draw),
+                        avg(total_duration_ms) FILTER (WHERE status = 'completed')
+                 FROM runs WHERE game_type = ?1",
+                    params![game_type],
+                    |row| {
+                        Ok(GameHistory {
+                            completed: row.get(0)?,
+                            failed: row.get(1)?,
+                            draws: row.get(2)?,
+                            avg_duration_ms: row.get(3)?,
+                            runs: Vec::new(),
+                        })
+                    },
+                )
+                .map_err(|err| err.to_string())?;
+            let offset = i64::from(page.saturating_sub(1)) * i64::from(HISTORY_PAGE_SIZE);
+            history.runs =
+                finished_run_metrics(&conn, &game_type, HISTORY_PAGE_SIZE, offset, false)?;
+            Ok(history)
         })
         .await
     }
@@ -362,9 +563,9 @@ impl RunStore {
 
     /// Aggregate model outcomes from durable run history. Prompt file contents
     /// and API credentials are never read from, or included in, this output.
-    pub async fn leaderboard(&self) -> Result<Vec<LeaderboardEntry>, String> {
+    pub async fn leaderboard(&self, game: Option<&Game>) -> Result<Vec<LeaderboardEntry>, String> {
         let mut entries: HashMap<String, LeaderboardAccumulator> = HashMap::new();
-        for run in self.list_runs().await? {
+        for run in self.list_runs(game).await? {
             let Some(result) = run.result else {
                 continue;
             };
@@ -372,13 +573,14 @@ impl RunStore {
             let winner = stats.winner.as_deref().and_then(winner_agent_index);
             for (index, agent) in run.agents.iter().enumerate() {
                 let entry = entries.entry(agent.model.clone()).or_default();
-                entry.games += 1;
-                if stats.draw {
-                    entry.draws += 1;
-                } else if winner == Some(index) {
-                    entry.wins += 1;
-                } else if winner.is_some() {
-                    entry.losses += 1;
+                entry.record.add_appearance(index, winner, stats.draw);
+                if let [first, second] = run.agents.as_slice() {
+                    let opponent = if index == 0 { second } else { first };
+                    entry
+                        .opponents
+                        .entry(opponent.model.clone())
+                        .or_default()
+                        .add_appearance(index, winner, stats.draw);
                 }
                 for turn in &stats.turns {
                     if turn.player.contains(&format!("_{}", index + 1)) {
@@ -395,10 +597,11 @@ impl RunStore {
             .into_iter()
             .map(|(model, entry)| LeaderboardEntry {
                 model,
-                games: entry.games,
-                wins: entry.wins,
-                losses: entry.losses,
-                draws: entry.draws,
+                games: entry.record.games,
+                wins: entry.record.wins,
+                losses: entry.record.losses,
+                draws: entry.record.draws,
+                opponents: entry.opponents,
                 invalid_moves: entry.invalid_moves,
                 average_turn_time_ms: if entry.turns == 0 {
                     0.0
@@ -507,6 +710,7 @@ fn ensure_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX IF NOT EXISTS idx_runs_status_created ON runs(status, created_at);
         ALTER TABLE runs ADD COLUMN IF NOT EXISTS matrix_job_id VARCHAR;
+        ALTER TABLE runs ADD COLUMN IF NOT EXISTS batch_mode VARCHAR;
         CREATE INDEX IF NOT EXISTS idx_runs_matrix ON runs(matrix_job_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_run_turns_run ON run_turns(run_id, seq);
 
@@ -521,6 +725,61 @@ fn ensure_schema(conn: &Connection) -> Result<(), String> {
         ",
     )
     .map_err(|err| err.to_string())
+}
+
+fn finished_run_metrics(
+    conn: &Connection,
+    game: &str,
+    limit: u32,
+    offset: i64,
+    single_only: bool,
+) -> Result<Vec<RunMetrics>, String> {
+    let mut query = conn.prepare(
+        "WITH selected AS (
+             SELECT *, CASE WHEN ?4 THEN coalesce(finished_at, created_at) ELSE created_at END AS listed_at
+             FROM runs WHERE game_type = ?1 AND status IN ('completed', 'error')
+                       AND (NOT ?4 OR matrix_job_id IS NULL)
+         )
+         SELECT id, coalesce(strftime(epoch_ms(try_cast(try_cast(rtrim(listed_at, 'Z') AS DOUBLE) * 1000 AS BIGINT)),
+                                      '%Y-%m-%d %H:%M'), listed_at),
+                agents_json, status, winner, draw, total_turns, invalid_moves, total_duration_ms
+         FROM selected ORDER BY listed_at DESC, id DESC LIMIT ?2 OFFSET ?3"
+    ).map_err(|err| err.to_string())?;
+    let rows = query
+        .query_map(
+            params![game, limit, offset, single_only],
+            run_metrics_from_row,
+        )
+        .map_err(|err| err.to_string())?;
+    rows.collect::<Result<_, _>>()
+        .map_err(|err| err.to_string())
+}
+
+fn run_metrics_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<RunMetrics> {
+    let agents: Vec<AIAgentConfig> =
+        serde_json::from_str(&row.get::<_, String>(2)?).unwrap_or_default();
+    let winner: Option<String> = row.get(4)?;
+    let outcome = if row.get::<_, String>(3)? == "error" {
+        "Failed".into()
+    } else if row.get::<_, bool>(5)? {
+        "Draw".into()
+    } else if let Some(winner) = winner {
+        let label = winner_agent_index(&winner)
+            .and_then(|index| agents.get(index))
+            .map_or(winner.as_str(), |agent| agent.model.as_str());
+        format!("{label} won")
+    } else {
+        "Completed".into()
+    };
+    Ok(RunMetrics {
+        id: row.get(0)?,
+        listed_at: row.get(1)?,
+        agents,
+        outcome,
+        turns: row.get(6)?,
+        invalid_moves: row.get(7)?,
+        duration_ms: row.get(8)?,
+    })
 }
 
 fn stored_run_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<StoredRun> {
@@ -653,7 +912,7 @@ mod tests {
         store.mark_running(&run_id).await.unwrap();
         store.complete_run(&run_id, &test_result()).await.unwrap();
 
-        let runs = store.list_runs().await.unwrap();
+        let runs = store.list_runs(None).await.unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].id, run_id);
         assert_eq!(runs[0].status, "completed");
@@ -669,11 +928,114 @@ mod tests {
         let storage: &dyn GameStorage = &store;
         assert_eq!(storage.list_events(&run_id).await.unwrap().len(), 1);
 
-        let leaderboard = store.leaderboard().await.unwrap();
+        let leaderboard = store.leaderboard(Some(&game)).await.unwrap();
         assert_eq!(leaderboard[0].model, "model-a");
         assert_eq!(leaderboard[0].wins, 1);
         assert_eq!(leaderboard[1].model, "model-b");
         assert_eq!(leaderboard[1].losses, 1);
+    }
+
+    #[tokio::test]
+    async fn leaderboard_counts_only_appearances_in_the_selected_game() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RunStore::new(dir.path().join("rankings.duckdb"));
+        let mut agents = test_agents();
+        let tictactoe = Game::from("TicTacToe");
+        let connect_four = Game::from("ConnectFour");
+        let first = store.create_run(&tictactoe, &agents, None).await.unwrap();
+        store.complete_run(&first, &test_result()).await.unwrap();
+
+        agents[1].model = "model-c".into();
+        let mut stats = GameStats::new();
+        stats.draw = true;
+        let draw = TestResult::ConnectFour(crate::games::game::ConnectFourResult {
+            winner: None,
+            stats,
+            error: None,
+        });
+        let second = store
+            .create_run(&connect_four, &agents, None)
+            .await
+            .unwrap();
+        store.complete_run(&second, &draw).await.unwrap();
+
+        let board = store.leaderboard(Some(&connect_four)).await.unwrap();
+        assert_eq!(board.len(), 2);
+        assert_eq!(
+            (
+                board[0].model.as_str(),
+                board[0].games,
+                board[0].wins,
+                board[0].draws
+            ),
+            ("model-a", 1, 0, 1)
+        );
+        assert_eq!(board[1].model, "model-c");
+        assert_eq!(board[0].opponents.len(), 1);
+        assert_eq!(board[0].opponents["model-c"].draws, 1);
+        let combined = store.leaderboard(None).await.unwrap();
+        assert_eq!(
+            (combined[0].games, combined[0].wins, combined[0].draws),
+            (2, 1, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn head_to_head_records_follow_seats_and_reconcile_with_the_leaderboard() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RunStore::new(dir.path().join("opponents.duckdb"));
+        let game = Game::from("TicTacToe");
+        let mut agents = test_agents();
+        for (first, second) in [("a", "b"), ("b", "a"), ("a", "c"), ("a", "a")] {
+            agents[0].model = first.into();
+            agents[1].model = second.into();
+            let id = store.create_run(&game, &agents, None).await.unwrap();
+            store.complete_run(&id, &test_result()).await.unwrap();
+        }
+        let board = store.leaderboard(Some(&game)).await.unwrap();
+        let a = &board[0];
+        assert_eq!(a.model, "a");
+        assert_eq!((a.games, a.wins, a.losses), (5, 3, 2));
+        for (model, games, wins, losses) in [("a", 2, 1, 1), ("b", 2, 1, 1), ("c", 1, 1, 0)] {
+            let record = &a.opponents[model];
+            assert_eq!(
+                (record.games, record.wins, record.losses),
+                (games, wins, losses)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn history_filters_finished_runs_and_keeps_missing_metrics_distinct_from_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.duckdb");
+        let store = RunStore::new(&path);
+        let game = Game::from("TicTacToe");
+        let agents = test_agents();
+        let finished = store.create_run(&game, &agents, None).await.unwrap();
+        store.complete_run(&finished, &test_result()).await.unwrap();
+        let failed = store.create_run(&game, &agents, None).await.unwrap();
+        store.mark_error(&failed, "offline").await.unwrap();
+        store.create_run(&game, &agents, None).await.unwrap();
+        let chess = store
+            .create_run(&Game::from("Chess"), &agents, None)
+            .await
+            .unwrap();
+        store.mark_error(&chess, "offline").await.unwrap();
+
+        let history = RunStore::new(path).game_history(&game, 1).await.unwrap();
+        assert_eq!(
+            (history.completed, history.failed, history.draws),
+            (1, 1, 0)
+        );
+        assert_eq!(history.avg_duration_ms, Some(42.0));
+        assert_eq!(history.runs.len(), 2);
+        assert_eq!(history.runs[0].id, failed);
+        assert_eq!(history.runs[0].turns, None);
+        assert_eq!(history.runs[1].id, finished);
+        assert_eq!(history.runs[1].turns, Some(1));
+        assert_eq!(history.runs[1].invalid_moves, Some(0));
+        assert_eq!(history.runs[1].outcome, "model-a won");
     }
 
     #[tokio::test]

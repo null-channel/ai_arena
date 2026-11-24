@@ -1,9 +1,9 @@
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
 };
 use tower_http::{
@@ -12,7 +12,8 @@ use tower_http::{
 };
 
 use super::{games, leaderboard, matrix, runs, secrets, websocket};
-use crate::server::{htmx, jobs::job_summaries, sessions::game_summaries, state::AppState};
+use crate::server::config::RunMode;
+use crate::server::{htmx, sessions::live_game_summaries, state::AppState};
 
 /// Build the Axum router (API routes plus optional static file serving).
 pub(in crate::server) fn build_router(
@@ -21,6 +22,35 @@ pub(in crate::server) fn build_router(
 ) -> Router {
     let api = Router::new()
         .route("/", get(index_page))
+        .route("/series", get(async || Redirect::permanent("/multi")))
+        .route("/round-robin", get(async || Redirect::permanent("/matrix")))
+        .route(
+            "/assets/arena.css",
+            get(async || {
+                (
+                    [("content-type", "text/css")],
+                    include_str!("../assets/arena.css"),
+                )
+            }),
+        )
+        .route(
+            "/assets/arena.js",
+            get(async || {
+                (
+                    [("content-type", "text/javascript")],
+                    include_str!("../assets/arena.js"),
+                )
+            }),
+        )
+        .route(
+            "/assets/htmx.js",
+            get(async || {
+                (
+                    [("content-type", "text/javascript")],
+                    include_str!("../assets/vendor/htmx-2.0.4.min.js"),
+                )
+            }),
+        )
         .route("/api/health", get(health_check))
         .merge(games::routes())
         .merge(matrix::routes())
@@ -71,17 +101,29 @@ async fn require_auth(State(state): State<AppState>, request: Request, next: Nex
 }
 
 async fn index_page(State(state): State<AppState>) -> Html<String> {
+    console_page(state, RunMode::Single).await
+}
+
+pub(super) async fn console_page(state: AppState, mode: RunMode) -> Html<String> {
     let profiles = state.secrets.lock().await.list_profiles();
     let defaults = state.form_defaults.lock().await.clone();
-    let games = game_summaries(&state).await;
-    let jobs = job_summaries(&state).await;
-    let leaderboard = state.store.leaderboard().await;
+    let activity = if mode == RunMode::Single {
+        htmx::render_games_fragment(&live_game_summaries(&state).await)
+    } else {
+        matrix::batch_activity(State(state.clone()), Extension(mode))
+            .await
+            .map(|Html(activity)| activity)
+            .unwrap_or_else(|_| "<p class='empty'>Batch history is unavailable.</p>".into())
+    };
+    let game = crate::games::game::Game::new(&defaults.game_type);
+    let recent = match game {
+        Some(game) => runs::load_recent_results(&state, &game, mode)
+            .await
+            .unwrap_or_else(|_| "<p class='empty'>Run history is unavailable.</p>".into()),
+        None => "<p class='empty'>Select a game to see recent results.</p>".into(),
+    };
     Html(htmx::render_index_page(
-        &profiles,
-        &defaults,
-        &games,
-        &jobs,
-        leaderboard,
+        &profiles, &defaults, &activity, mode, &recent,
     ))
 }
 
@@ -182,7 +224,6 @@ mod tests {
         assert!(body.contains("value=\"ConnectFour\" checked"));
         assert!(body.contains("value=\"gemini-test\""));
         assert!(body.contains("value=\"claude-test\""));
-        assert!(body.contains("<option value=\"Gemini\" selected>Gemini</option>"));
     }
 
     #[tokio::test]

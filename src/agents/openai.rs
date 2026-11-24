@@ -15,6 +15,7 @@ pub struct OpenAIAgent {
     name: String,
     model: String,
     client: Client<OpenAIConfig>,
+    temperature: Option<f32>,
     custom_prompt: Option<String>,
 }
 
@@ -27,6 +28,7 @@ impl OpenAIAgent {
         name: impl Into<String>,
         model: impl Into<String>,
         api_key: impl Into<String>,
+        temperature: Option<f32>,
         custom_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
         let api_key = api_key.into();
@@ -38,6 +40,7 @@ impl OpenAIAgent {
             name: name.into(),
             model: model.into(),
             client,
+            temperature,
             custom_prompt,
         })
     }
@@ -59,7 +62,11 @@ impl OpenAIAgent {
                 .into(),
         ];
 
-        let req = CreateChatCompletionRequestArgs::default()
+        let mut builder = CreateChatCompletionRequestArgs::default();
+        if let Some(temperature) = self.temperature {
+            builder.temperature(temperature);
+        }
+        let req = builder
             .model(&self.model)
             .messages(messages)
             .response_format(ResponseFormat::JsonObject)

@@ -23,6 +23,17 @@ pub struct GameSession {
 }
 
 impl GameSession {
+    pub(super) fn pending(game: Game, agents: Vec<AIAgentConfig>) -> Self {
+        Self {
+            game_type: game.name().to_owned(),
+            game,
+            agents,
+            status: GameStatus::Pending,
+            events: Arc::default(),
+            result: None,
+        }
+    }
+
     pub(super) fn record_event(&mut self, event: GameEvent) {
         if self.result.is_some() {
             self.events = Arc::default();
@@ -96,23 +107,17 @@ impl From<StoredRun> for GameSummary {
     }
 }
 
-pub(super) async fn game_summaries(state: &AppState) -> Vec<GameSummary> {
-    let mut sessions = state
+pub(super) async fn live_game_summaries(state: &AppState) -> Vec<GameSummary> {
+    let mut games = state
         .games
         .lock()
         .await
         .iter()
-        .map(|(id, session)| (id.clone(), GameSummary::from_session(id, session)))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    match state.store.list_runs().await {
-        Ok(runs) => {
-            for run in runs {
-                sessions.entry(run.id.clone()).or_insert_with(|| run.into());
-            }
-        }
-        Err(error) => eprintln!("Failed to list DuckDB runs: {}", error),
-    }
-    sessions.into_values().collect()
+        .filter(|(_, session)| matches!(session.status, GameStatus::Pending | GameStatus::Running))
+        .map(|(id, session)| GameSummary::from_session(id, session))
+        .collect::<Vec<_>>();
+    games.sort_by(|a, b| a.game_id.cmp(&b.game_id));
+    games
 }
 
 pub(super) async fn game_detail(
@@ -139,32 +144,15 @@ pub(super) async fn create_game_session(
     game_type: String,
     agents: Vec<AIAgentConfig>,
 ) -> Result<String, AppError> {
-    create_game_session_with_metadata(state, game_type, agents, RunMetadata::source("web")).await
-}
-
-pub(super) async fn create_game_session_with_metadata(
-    state: &AppState,
-    game_type: String,
-    agents: Vec<AIAgentConfig>,
-    metadata: RunMetadata,
-) -> Result<String, AppError> {
     let game = Game::new(&game_type)
         .ok_or_else(|| AppError::BadRequest("Invalid game type".to_string()))?;
     let game_id = state
         .store
-        .create_run(&game, &agents, Some(metadata))
+        .create_run(&game, &agents, Some(RunMetadata::source("web")))
         .await
         .map_err(AppError::Internal)?;
 
-    let session = GameSession {
-        game_type,
-        game,
-        agents,
-        status: GameStatus::Pending,
-        events: Arc::default(),
-        result: None,
-    };
-
+    let session = GameSession::pending(game, agents);
     state.games.lock().await.insert(game_id.clone(), session);
     Ok(game_id)
 }

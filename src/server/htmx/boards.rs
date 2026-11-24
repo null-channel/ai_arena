@@ -1,4 +1,4 @@
-use super::{forms::kind_name, layout::html_escape};
+use super::layout::html_escape;
 use crate::agent_config::AIAgentConfig;
 
 pub(super) fn render_human_state(
@@ -83,14 +83,14 @@ fn player_slots_for_game(game_type: &str) -> Vec<PlayerSlot<'static>> {
         "RockPaperScissors" => vec![
             PlayerSlot {
                 agent_index: 0,
-                role_label: "Player 1",
-                mark: "P1",
+                role_label: "Agent 1",
+                mark: "A1",
                 piece_class: "",
             },
             PlayerSlot {
                 agent_index: 1,
-                role_label: "Player 2",
-                mark: "P2",
+                role_label: "Agent 2",
+                mark: "A2",
                 piece_class: "",
             },
         ],
@@ -112,14 +112,14 @@ pub(super) fn render_player_legend(game_type: &str, agents: &[AIAgentConfig]) ->
                 <span class="player-mark {}">{}</span>
                 <span class="player-info">
                     <strong>{}</strong>
-                    <small>{} · {}</small>
+                    <small>{} · {:?}</small>
                 </span>
             </div>"#,
             slot.piece_class,
             html_escape(slot.mark),
             html_escape(&agent.model),
             html_escape(slot.role_label),
-            html_escape(kind_name(agent.agent))
+            agent.agent
         ));
     }
     html.push_str("</div>");
@@ -313,11 +313,8 @@ fn render_rps_state(agents: &[AIAgentConfig], state: &serde_json::Value) -> Stri
     let player_one = agents
         .first()
         .map(|a| a.model.as_str())
-        .unwrap_or("Player 1");
-    let player_two = agents
-        .get(1)
-        .map(|a| a.model.as_str())
-        .unwrap_or("Player 2");
+        .unwrap_or("Agent 1");
+    let player_two = agents.get(1).map(|a| a.model.as_str()).unwrap_or("Agent 2");
     let mut html = format!(
         "<div class=\"board-wrap\"><h3>Scoreboard</h3><p class=\"board-meta\">Round {} · {} {} - {} {}</p>",
         round,

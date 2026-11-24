@@ -32,22 +32,6 @@ pub(super) async fn response_text(response: Response) -> String {
 }
 
 #[tokio::test]
-async fn root_page_renders_htmx_ui() {
-    let app = build_router(test_state(), None);
-    let response = app
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_text(response).await;
-    assert!(body.contains("AI Arena"));
-    assert!(body.contains("hx-post=\"/games/start\""));
-    assert!(body.contains("No npm build step"));
-    assert!(body.contains("Start Matrix"));
-}
-
-#[tokio::test]
 async fn persisted_run_api_and_replay_page_are_available() {
     let app = build_router(test_state(), None);
     let created = app

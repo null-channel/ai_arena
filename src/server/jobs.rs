@@ -1,6 +1,6 @@
 use super::{
     error::AppError,
-    sessions::{GameStatus, create_game_session_with_metadata, run_session},
+    sessions::{GameSession, GameStatus, run_session},
     state::AppState,
 };
 use crate::agent_config::AIAgentConfig;
@@ -29,6 +29,8 @@ pub enum MatrixStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatrixRun {
+    pub models: [String; 2],
+    pub repetition: u32,
     pub run_id: String,
     pub status: GameStatus,
 }
@@ -93,58 +95,77 @@ impl MatrixJob {
     }
 }
 
-pub(super) async fn job_summaries(state: &AppState) -> Vec<MatrixJobResponse> {
-    let mut jobs = state
-        .matrix_jobs
-        .lock()
-        .await
-        .values()
-        .map(MatrixJob::response)
-        .collect::<Vec<_>>();
-    jobs.sort_by(|left, right| left.matrix_id.cmp(&right.matrix_id));
+pub(super) const MAX_JOB_RUNS: usize = 1000;
 
-    jobs
+fn pair_schedule(count: usize, repetitions: u32) -> Result<Vec<([usize; 2], u32)>, AppError> {
+    if count < 2 || repetitions == 0 {
+        return Err(AppError::BadRequest(
+            "Choose at least two agents and one match per pair.".into(),
+        ));
+    }
+    let total = count
+        .checked_mul(count - 1)
+        .and_then(|n| (n / 2).checked_mul(repetitions as usize))
+        .filter(|&n| n <= MAX_JOB_RUNS)
+        .ok_or_else(|| {
+            AppError::BadRequest(format!("A job can contain up to {MAX_JOB_RUNS} matches."))
+        })?;
+    let mut schedule = Vec::with_capacity(total);
+    for repetition in 1..=repetitions {
+        for first in 0..count {
+            for second in first + 1..count {
+                schedule.push(([first, second], repetition));
+            }
+        }
+    }
+    Ok(schedule)
 }
 
 pub(super) async fn create_matrix_job(
     state: &AppState,
     request: CreateMatrixRequest,
+    mode: super::config::RunMode,
 ) -> Result<MatrixJobResponse, AppError> {
-    if request.repetitions == 0 || request.repetitions > 1_000 {
-        return Err(AppError::BadRequest(
-            "repetitions must be between 1 and 1000".to_string(),
-        ));
-    }
-    if request.agents.len() != 2 {
-        return Err(AppError::BadRequest(
-            "a matrix game requires exactly two agents".to_string(),
-        ));
-    }
-    Game::new(&request.game_type)
+    let game = Game::new(&request.game_type)
         .ok_or_else(|| AppError::BadRequest("Invalid game type".to_string()))?;
-
+    let schedule = pair_schedule(request.agents.len(), request.repetitions)?;
     let matrix_id = Uuid::new_v4().to_string();
     let concurrency_limit = request.concurrency_limit.unwrap_or(4).clamp(1, 32);
-    let mut runs = Vec::with_capacity(request.repetitions as usize);
-    for repetition in 1..=request.repetitions {
-        let run_id = create_game_session_with_metadata(
-            state,
-            request.game_type.clone(),
-            request.agents.clone(),
-            RunMetadata {
-                source: Some("matrix".to_string()),
+    let configurations = schedule
+        .iter()
+        .map(|&([a, b], repetition)| {
+            let agents = vec![request.agents[a].clone(), request.agents[b].clone()];
+            let metadata = RunMetadata {
+                source: Some(mode.path().trim_start_matches('/').into()),
                 description: None,
                 repetition: Some(repetition),
                 matrix_job_id: Some(matrix_id.clone()),
-            },
-        )
-        .await?;
+            };
+            (agents, Some(metadata))
+        })
+        .collect();
+    let ids = state
+        .store
+        .create_runs(&game, configurations)
+        .await
+        .map_err(AppError::Internal)?;
+    let mut runs = Vec::with_capacity(ids.len());
+    let mut sessions = state.games.lock().await;
+    for (id, ([a, b], repetition)) in ids.into_iter().zip(schedule) {
+        let first = &request.agents[a];
+        let second = &request.agents[b];
         runs.push(MatrixRun {
-            run_id,
+            run_id: id.clone(),
             status: GameStatus::Pending,
+            models: [first.model.clone(), second.model.clone()],
+            repetition,
         });
+        sessions.insert(
+            id,
+            GameSession::pending(game.clone(), vec![first.clone(), second.clone()]),
+        );
     }
-
+    drop(sessions);
     let job = MatrixJob {
         id: matrix_id.clone(),
         game_type: request.game_type,
@@ -236,8 +257,26 @@ mod tests {
     };
     use tower::ServiceExt;
 
+    #[test]
+    fn matrix_schedules_each_unordered_pair_once_per_repetition() {
+        let schedule = pair_schedule(3, 3).unwrap();
+        assert_eq!(schedule.len(), 9);
+        for rep in 1..=3 {
+            let pairs: Vec<_> = schedule
+                .iter()
+                .filter(|(_, r)| *r == rep)
+                .map(|(pair, _)| *pair)
+                .collect();
+            assert_eq!(pairs, [[0, 1], [0, 2], [1, 2]]);
+        }
+        assert_eq!(pair_schedule(2, 5).unwrap().len(), 5);
+        assert!(pair_schedule(1, 3).is_err());
+        assert!(pair_schedule(3, 0).is_err());
+        assert!(pair_schedule(3, 334).is_err());
+    }
+
     #[tokio::test]
-    async fn matrix_status_api_and_fragment_report_progress() {
+    async fn matrix_status_api_reports_progress() {
         let state = test_state();
         state.matrix_jobs.lock().await.insert(
             "matrix-test".to_string(),
@@ -248,14 +287,20 @@ mod tests {
                 status: MatrixStatus::Running,
                 runs: vec![
                     MatrixRun {
+                        models: ["a".into(), "b".into()],
+                        repetition: 1,
                         run_id: "run-complete".to_string(),
                         status: GameStatus::Completed,
                     },
                     MatrixRun {
+                        models: ["a".into(), "b".into()],
+                        repetition: 1,
                         run_id: "run-active".to_string(),
                         status: GameStatus::Running,
                     },
                     MatrixRun {
+                        models: ["a".into(), "b".into()],
+                        repetition: 1,
                         run_id: "run-error".to_string(),
                         status: GameStatus::Error,
                     },
@@ -279,20 +324,5 @@ mod tests {
         assert!(body.contains("\"completed\":1"));
         assert!(body.contains("\"running\":1"));
         assert!(body.contains("\"failed\":1"));
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/matrix")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_text(response).await;
-        assert!(body.contains("matrix-test"));
-        assert!(body.contains("run-complete"));
-        assert!(body.contains("Replay"));
     }
 }

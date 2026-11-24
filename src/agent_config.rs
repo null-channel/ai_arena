@@ -24,6 +24,59 @@ pub enum AgentKind {
     Ollama,
 }
 
+impl AgentKind {
+    // Exact model IDs also match their dated snapshots. "*" means the adapter
+    // accepts a temperature for custom model names (including local models).
+    pub fn temperature_models(self) -> &'static [&'static str] {
+        match self {
+            Self::OpenAI => &[
+                "gpt-4",
+                "gpt-4-turbo",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-4.1",
+                "gpt-4.1-mini",
+                "gpt-4.1-nano",
+                "gpt-5.2",
+                "gpt-5.4",
+            ],
+            Self::Gemini => &[
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-001",
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash-lite-001",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+            ],
+            Self::Ollama => &["*"],
+            Self::Anthropic => &[],
+        }
+    }
+
+    pub fn supports_temperature(self, model: &str) -> bool {
+        self.temperature_models().iter().any(|&id| {
+            id == "*"
+                || model == id
+                || model
+                    .strip_prefix(id)
+                    .and_then(|suffix| suffix.strip_prefix('-'))
+                    .is_some_and(|date| {
+                        date.len() == 10
+                            && date.bytes().enumerate().all(|(i, ch)| {
+                                if i == 4 || i == 7 {
+                                    ch == b'-'
+                                } else {
+                                    ch.is_ascii_digit()
+                                }
+                            })
+                    })
+        })
+    }
+}
+
 impl std::str::FromStr for AgentKind {
     type Err = String;
 
@@ -95,6 +148,7 @@ pub fn build_agents(configs: Vec<AIAgentConfig>, secrets: Option<&SecretsManager
             let secret_profile = cfg.secret_profile.as_deref().unwrap_or("default");
             let custom_prompt = load_prompt_file(cfg.prompt_file.as_deref());
             println!("AgentConfig: Building agent {} with secret_profile: '{}'", i, secret_profile);
+            let temperature = cfg.agent.supports_temperature(&cfg.model).then_some(cfg.temp);
             match cfg.agent {
                 AgentKind::OpenAI => {
                     let name = format!("OpenAI_{}", i + 1);
@@ -117,7 +171,7 @@ pub fn build_agents(configs: Vec<AIAgentConfig>, secrets: Option<&SecretsManager
                         .or_else(|| std::env::var("OPENAI_API_KEY").ok())
                         .expect("Failed to resolve OpenAI API key (check secrets or OPENAI_API_KEY env var)");
 
-                    AIAgent::OpenAI(OpenAIAgent::new(&name, &cfg.model, &api_key, custom_prompt).expect("create openai agent"))
+                    AIAgent::OpenAI(OpenAIAgent::new(&name, &cfg.model, &api_key, temperature, custom_prompt).expect("create openai agent"))
                 }
                 AgentKind::Anthropic => {
                     let name = format!("Anthropic_{}", i + 1);
@@ -155,7 +209,7 @@ pub fn build_agents(configs: Vec<AIAgentConfig>, secrets: Option<&SecretsManager
                         .expect("Failed to resolve Gemini API key (check secrets or GEMINI_API_KEY env var)");
 
                     AIAgent::Gemini(
-                        GeminiAgent::new(&name, &cfg.model, &key, cfg.temp, custom_prompt)
+                        GeminiAgent::new(&name, &cfg.model, &key, temperature, custom_prompt)
                             .expect("create gemini agent"),
                     )
                 }
@@ -178,6 +232,17 @@ mod tests {
     use super::*;
     use crate::secrets::{SecretMode, SecretsManager};
     use std::path::PathBuf;
+
+    #[test]
+    fn temperature_follows_the_provider_and_model() {
+        assert!(!AgentKind::Anthropic.supports_temperature("claude-sonnet-4-6"));
+        assert!(AgentKind::OpenAI.supports_temperature("gpt-4o-2024-08-06"));
+        assert!(!AgentKind::OpenAI.supports_temperature("gpt-5-mini"));
+        assert!(!AgentKind::OpenAI.supports_temperature("gpt-5.4-pro"));
+        assert!(!AgentKind::Gemini.supports_temperature("gemini-3.6-flash"));
+        assert!(AgentKind::Gemini.supports_temperature("gemini-2.5-flash"));
+        assert!(AgentKind::Ollama.supports_temperature("local:custom"));
+    }
 
     #[test]
     fn test_build_agents_with_profile() {

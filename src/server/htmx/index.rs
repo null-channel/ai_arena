@@ -1,79 +1,56 @@
-use super::{
-    forms::{render_matrix_form, render_start_form},
-    games::render_games_fragment,
-    layout::layout,
-    leaderboard::render_leaderboard_fragment,
-    matrix::render_matrix_fragment,
-};
-use crate::{
-    server::{config::FormDefaults, jobs::MatrixJobResponse, sessions::GameSummary},
-    storage::LeaderboardEntry,
-};
+use super::{forms::render_form, layout::layout};
+use crate::server::config::{FormDefaults, RunMode};
 
 pub(in crate::server) fn render_index_page(
     profiles: &[String],
     defaults: &FormDefaults,
-    games: &[GameSummary],
-    jobs: &[MatrixJobResponse],
-    leaderboard: Result<Vec<LeaderboardEntry>, String>,
+    activity: &str,
+    mode: RunMode,
+    recent: &str,
 ) -> String {
+    let form_id = if mode == RunMode::Single {
+        "start-form"
+    } else {
+        "matrix-form"
+    };
+    let tabs = [RunMode::Single, RunMode::Multi, RunMode::Matrix]
+        .into_iter()
+        .map(|tab| {
+            let current = if tab == mode {
+                " aria-current=\"page\""
+            } else {
+                ""
+            };
+            format!(r#"<a href="{}"{current}>{}</a>"#, tab.path(), tab.label())
+        })
+        .collect::<String>();
+    let (activity_heading, activity_path) = match mode {
+        RunMode::Single => (
+            r#"<i class="live-dot" aria-hidden="true"></i>Live matches"#,
+            "/games",
+        ),
+        RunMode::Multi => ("Batches", "/multi/activity"),
+        RunMode::Matrix => ("Batches", "/matrix/activity"),
+    };
     let content = format!(
-        r##"
-        <section class="hero">
-            <div>
-                <p class="eyebrow">AI Arena control room</p>
-                <h1>AI Arena</h1>
-            </div>
-            <div class="hero-card">
-                <span class="metric-label">Active Sessions</span>
-                <strong hx-get="/games" hx-trigger="load, every 3s" hx-select="[data-session-count]" hx-swap="innerHTML">...</strong>
-            </div>
-        </section>
-
-        <main class="grid">
-            <section class="panel">
-                <div class="panel-heading">
-                    <div>
-                        <p class="eyebrow">new match</p>
-                        <h2>Configure Battle</h2>
+        r#"
+        <main>
+            <div class="grid">
+                <section class="panel setup">
+                    <div class="panel-heading"><h1>Match setup</h1>
+                        <nav class="switch" aria-label="Match mode">{tabs}</nav>
                     </div>
-                </div>
-                <div id="start-form">
-                    {}
-                </div>
-            </section>
-
-            <section class="panel">
-                <div class="panel-heading">
-                    <div>
-                        <p class="eyebrow">live room</p>
-                        <h2>Sessions</h2>
-                    </div>
-                    <button class="ghost" hx-get="/games" hx-target="#session-list" hx-swap="outerHTML">Refresh</button>
-                </div>
-                <div id="session-list" hx-get="/games" hx-trigger="load, every 3s" hx-swap="outerHTML">
-                    {}
-                </div>
-            </section>
-        </main>
-        <section class="panel stack">
-            <div class="panel-heading">
-                <div><p class="eyebrow">simulation matrix</p><h2>Run a Series</h2></div>
+                    <div id="{form_id}">{form}</div>
+                </section>
+                <aside class="stack">
+                    <section class="panel"><h2>{activity_heading}</h2>
+                        <div class="activity" hx-get="{activity_path}" hx-trigger="every 3s">{activity}</div>
+                    </section>
+                    <section class="panel"><h2>Recent results</h2><div id="recent-results" aria-live="polite">{recent}</div></section>
+                </aside>
             </div>
-            <div id="matrix-form">{}</div>
-            <div id="matrix-list" hx-get="/matrix" hx-trigger="load, every 2s" hx-swap="outerHTML">{}</div>
-        </section>
-        <section class="panel stack">
-            <div class="panel-heading"><div><p class="eyebrow">durable history</p><h2>Leaderboard</h2></div></div>
-            <div id="leaderboard" hx-get="/leaderboard" hx-trigger="load, every 5s" hx-swap="outerHTML">{}</div>
-        </section>
-        "##,
-        render_start_form(profiles, defaults, None),
-        render_games_fragment(games),
-        render_matrix_form(defaults, None),
-        render_matrix_fragment(jobs),
-        render_leaderboard_fragment(leaderboard),
+        </main>"#,
+        form = render_form(profiles, defaults, mode, None, None),
     );
-
-    layout("AI Arena", &content)
+    layout("Console", &content)
 }

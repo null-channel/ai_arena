@@ -22,7 +22,7 @@ impl GeminiAgent {
         name: impl Into<String>,
         model: impl Into<String>,
         api_key: impl Into<String>,
-        temperature: f32,
+        temperature: Option<f32>,
         custom_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
         let name = name.into();
@@ -31,11 +31,13 @@ impl GeminiAgent {
 
         let client = rig::providers::gemini::Client::new(&api_key)
             .map_err(|e| AgentError::Internal(format!("failed to create Gemini client: {}", e)))?;
-        let agent = client
-            .agent(&model)
-            .preamble("Be precise and concise.")
-            .temperature(temperature as f64)
-            .build();
+        let mut builder = client.agent(&model).preamble("Be precise and concise.");
+        if let Some(temperature) = temperature {
+            builder = builder.additional_params(serde_json::json!({
+                "generationConfig": { "temperature": temperature }
+            }));
+        }
+        let agent = builder.build();
 
         Ok(Self {
             name,
@@ -74,7 +76,7 @@ mod tests {
 
     #[test]
     fn test_gemini_agent_creation() {
-        let result = GeminiAgent::new("test_agent", "gemini-1.5-pro", "test_key", 0.7, None);
+        let result = GeminiAgent::new("test_agent", "gemini-1.5-pro", "test_key", Some(0.7), None);
         if let Ok(agent) = result {
             assert_eq!(agent.name(), "test_agent");
         }

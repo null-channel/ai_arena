@@ -1,7 +1,32 @@
 use std::path::PathBuf;
 
-use crate::agent_config::AgentKind;
+use crate::agent_config::{AIAgentConfig, AgentKind};
 use crate::storage::RunStore;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::server) enum RunMode {
+    Single,
+    Multi,
+    Matrix,
+}
+
+impl RunMode {
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Single => "/",
+            Self::Multi => "/multi",
+            Self::Matrix => "/matrix",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Single => "Single",
+            Self::Multi => "Multi",
+            Self::Matrix => "Matrix",
+        }
+    }
+}
 
 /// Server bind and static file options.
 #[derive(Debug, Clone)]
@@ -69,6 +94,37 @@ pub struct AgentFormDefaults {
     pub secret_profile: Option<String>,
     pub api_endpoint: Option<String>,
     pub prompt_file: Option<String>,
+}
+
+impl AgentFormDefaults {
+    pub(in crate::server) fn into_config(self) -> Result<AIAgentConfig, String> {
+        let model = self.model.trim().to_string();
+        if model.is_empty() {
+            return Err("Enter a model name for each player.".into());
+        }
+        let temperature = if self.kind.supports_temperature(&model) {
+            self.temp
+        } else {
+            0.7
+        };
+        if !(0.0..=2.0).contains(&temperature) {
+            return Err("Temperature must be between 0 and 2.".into());
+        }
+        Ok(AIAgentConfig {
+            model,
+            agent: self.kind,
+            temp: temperature,
+            seed: self.seed,
+            secret_profile: self
+                .secret_profile
+                .filter(|_| self.kind != AgentKind::Ollama),
+            api_endpoint: (self.kind == AgentKind::Ollama).then(|| {
+                self.api_endpoint
+                    .unwrap_or_else(|| "http://localhost:11434".into())
+            }),
+            prompt_file: self.prompt_file,
+        })
+    }
 }
 
 #[cfg(test)]
