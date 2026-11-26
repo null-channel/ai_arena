@@ -1,0 +1,4 @@
+<nav class="switch" aria-label="KubeBench mode">
+    <a href="/kubebench"{% if !matrix %} aria-current="page"{% endif %}>Single</a>
+    <a href="/kubebench/matrix"{% if matrix %} aria-current="page"{% endif %}>Matrix</a>
+</nav>

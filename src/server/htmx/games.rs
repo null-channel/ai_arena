@@ -44,7 +44,7 @@ pub(in crate::server) fn render_game_page(
         </main>
         "#,
     );
-    layout(arena_mode, "AI Arena Game", &content)
+    layout(arena_mode, "AI Arena Game", "/", &content)
 }
 
 pub(in crate::server) fn render_games_fragment(sessions: &[GameSummary]) -> String {

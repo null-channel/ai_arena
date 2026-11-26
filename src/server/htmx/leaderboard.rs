@@ -17,6 +17,7 @@ pub(in crate::server) fn render_rankings_page(
     layout(
         arena_mode,
         "Leaderboard",
+        "/rankings",
         &format!(
             r#"<main>
         <header class="page-heading"><h1>Leaderboard</h1><p>Compare model performance for each game.</p></header>

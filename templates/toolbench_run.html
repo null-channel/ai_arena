@@ -1,7 +1,7 @@
 <main class="stack" hx-history="false">
-    <a class="back-link" href="/toolbench">← Tool Calling</a>
+    <a class="back-link" href="/toolbench/history">← Run history</a>
     <section class="panel" id="bench-result"{% if running %} hx-get="/toolbench/{{ run.id }}" hx-trigger="every 2s" hx-select="#bench-result" hx-swap="outerHTML"{% endif %}>
-        <div class="panel-heading"><div><p class="eyebrow">{% if run.test_run %}Test benchmark{% else %}Saved benchmark{% endif %}</p><h2>{{ run.settings.label() }}</h2><p class="session-id">{{ run.id }}</p></div>
+        <div class="panel-heading"><div><p class="eyebrow">{% if run.test_run %}Practice benchmark{% else %}Recorded benchmark{% endif %}</p><h2>{{ run.settings.label() }}</h2><p class="session-id">{{ run.id }}</p></div>
             <span class="badge {{ badge }}">{{ run.status.label() }}</span></div>
         <p class="recent-game">{% if run.settings.subset.is_empty() %}All families{% else %}{{ run.settings.subset }}{% endif %} · {% if run.settings.lite %}Lite tool set{% else %}Full tool set{% endif %}</p>
         {% if running %}<p role="status">{% if progress.total > 0 %}{{ progress.done }} of {{ progress.total }} cases scored{% else %}Waiting for scores…{% endif %}</p>{% endif %}

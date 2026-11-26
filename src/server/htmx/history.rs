@@ -112,7 +112,7 @@ pub(in crate::server) fn render_history(
         ));
     }
     content.push_str("</nav></section></main>");
-    layout(arena_mode, "Run history", &content)
+    layout(arena_mode, "Run history", "/history", &content)
 }
 
 fn count(value: Option<i64>) -> String {

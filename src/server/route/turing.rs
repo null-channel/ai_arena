@@ -101,6 +101,7 @@ async fn dashboard(
     Ok(Html(layout(
         state.mode(),
         "Turing Test",
+        "/turing",
         &render(Operator {
             samples,
             stage: state.turing.stage().await,
@@ -215,6 +216,7 @@ async fn screen(State(state): State<AppState>) -> Result<Html<String>, AppError>
     Ok(Html(layout(
         state.mode(),
         "Turing Test",
+        "/turing/screen",
         &format!(r#"<main class="turing-screen">{content}</main>"#),
     )))
 }
@@ -270,7 +272,8 @@ async fn scores(
         .map_err(|e| AppError::Internal(format!("Cannot read viewer scores: {e}")))?;
     Ok(Html(layout(
         state.mode(),
-        "Turing Test",
+        "Turing Test · Viewer standings",
+        "/turing/scores",
         &render(Standings {
             total: rows.iter().map(|s| s.total).sum(),
             correct: rows.iter().map(|s| s.correct).sum(),

@@ -1,0 +1,32 @@
+<main class="grid" hx-history="false">
+    <section class="panel setup">
+        <div class="panel-heading"><div><h1>KubeBench</h1><span class="session-id">kind · fresh cluster per task</span></div>{% include "kubebench_modes.html" %}</div>
+        <form class="bench-form" method="post" {% if matrix %}action="/kubebench/matrix" hx-post="/kubebench/matrix" hx-target="#matrix-feedback" hx-disabled-elt="find button[type=submit]" data-next-slot="2"{% else %}action="/kubebench"{% endif %}>
+            {% if !error.is_empty() %}<p role="alert" class="notice failure">{{ error }}</p>{% endif %}
+            {% if matrix %}
+            <fieldset><legend>Agents</legend>
+                <div class="form-grid" id="agent-list">{{ agent|safe }}</div>
+                <template id="agent-template">{{ agent_template|safe }}</template>
+                <button type="button" class="roster-action" data-add-agent>+ Add agent</button>
+            </fieldset>
+            <fieldset><legend>Tasks</legend>
+                <label class="check-option"><input type="checkbox" data-kube-all{% if tasks.is_empty() %} disabled{% else %} checked{% endif %}>Run all tests</label>
+                {% for task in tasks %}<label class="check-option"><input type="checkbox" name="task:{{ task.id }}" checked data-kube-task>{{ task.title }}</label>{% endfor %}
+            </fieldset>
+            <output class="schedule-count" data-kube-count data-limit="{{ limit }}" aria-live="polite">1 agent × {{ tasks.len() }} tasks</output>
+            <div id="matrix-feedback" role="alert"></div>
+            {% else %}
+            {{ agent|safe }}
+            <label>Task<select name="suite">
+                {% if !tasks.is_empty() %}<option value="all"{% if selection == "all" %} selected{% endif %}>All tasks ({{ tasks.len() }})</option>{% endif %}
+                {% for task in tasks %}<option value="{{ task.id }}"{% if selection == task.id %} selected{% endif %}>{{ task.title }}</option>{% endfor %}
+            </select></label>
+            {% endif %}
+            <button type="submit"{% if tasks.is_empty() %} disabled{% endif %}>{% if matrix %}Start matrix{% else %}Start benchmark{% endif %}</button>
+        </form>
+    </section>
+    <aside class="panel"><h2>Recent runs</h2>
+        {% for run in recent %}<a class="recent-run" href="/kubebench/{{ run.id }}"><strong>{{ run.model }}</strong><small>{{ run.mode.run_label() }} · {{ run.phase }} · {{ run.passed() }}/{{ run.tested() }} passed</small></a>
+        {% else %}<p class="empty">No runs yet.</p>{% endfor %}
+    </aside>
+</main>

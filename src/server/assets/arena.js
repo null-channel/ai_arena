@@ -48,15 +48,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.addEventListener('DOMContentLoaded', () => {
     const control = document.getElementById('arena-mode');
-    const label = document.getElementById('arena-mode-label');
     const error = document.getElementById('mode-error');
     let revision = 0;
 
     function show(mode) {
         document.documentElement.dataset.mode = mode;
         control.checked = mode === 'real';
-        const status = control.checked ? 'Saving results' : 'Test mode';
-        if (label.textContent !== status) label.textContent = status;
     }
 
     async function refresh() {
@@ -163,6 +160,23 @@ document.addEventListener('htmx:afterSwap', event => {
 
 function updateMatrix(form) {
     const cards = Array.from(form.querySelectorAll('[data-agent]'));
+    const kubeCount = form.querySelector('[data-kube-count]');
+    cards.forEach((card, index) => {
+        card.querySelectorAll('[data-seat]').forEach(label => { label.textContent = index + 1; });
+        card.querySelector('[data-remove-agent]').disabled = cards.length <= (kubeCount ? 1 : 2);
+    });
+    if (kubeCount) {
+        const tasks = form.querySelectorAll('[data-kube-task]:checked').length;
+        const available = form.querySelectorAll('[data-kube-task]').length;
+        const selectAll = form.querySelector('[data-kube-all]');
+        selectAll.checked = available > 0 && tasks === available;
+        selectAll.indeterminate = tasks > 0 && tasks < available;
+        const total = cards.length * tasks;
+        const limit = Number(kubeCount.dataset.limit);
+        kubeCount.textContent = `${cards.length} ${cards.length === 1 ? 'agent' : 'agents'} × ${tasks} ${tasks === 1 ? 'task' : 'tasks'} · ${total} ${total === 1 ? 'run' : 'runs'}${total > limit ? ' (limit ' + limit + ')' : ''}`;
+        form.querySelector('button[type=submit]').disabled = total === 0 || total > limit;
+        return;
+    }
     const repetitions = form.elements.repetitions;
     const pairs = cards.length * (cards.length - 1) / 2;
     const total = pairs * repetitions.valueAsNumber;
@@ -173,10 +187,6 @@ function updateMatrix(form) {
     output.textContent = Number.isInteger(total) && total > 0
         ? `${pairs} ${pairs === 1 ? 'pair' : 'pairs'} · ${total} ${total === 1 ? 'match' : 'matches'} total${tooMany ? ` (limit ${limit})` : ''}`
         : 'Enter the number of matches per pair.';
-    cards.forEach((card, index) => {
-        card.querySelectorAll('[data-seat]').forEach(label => { label.textContent = index + 1; });
-        card.querySelector('[data-remove-agent]').disabled = cards.length <= 2;
-    });
 }
 
 document.addEventListener('click', event => {
@@ -203,7 +213,12 @@ document.addEventListener('click', event => {
     updateMatrix(form);
 });
 document.addEventListener('input', event => {
-    if (event.target.name === 'repetitions' && event.target.form?.querySelector('[data-match-count]')) {
+    if (event.target.matches('[data-kube-all]')) {
+        for (const task of event.target.form.querySelectorAll('[data-kube-task]')) {
+            task.checked = event.target.checked;
+        }
+    }
+    if (event.target.matches('[data-kube-all], [data-kube-task]') || (event.target.name === 'repetitions' && event.target.form?.querySelector('[data-match-count]'))) {
         updateMatrix(event.target.form);
     }
 });
@@ -327,7 +342,8 @@ function formatBenchTimes(root) {
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.querySelector('.bench-form');
-    if (form) {
+    if (form?.querySelector('[data-kube-count]')) updateMatrix(form);
+    if (form?.querySelector('[data-model-picker]')) {
         initBenchModels(form);
         form.addEventListener('input', () => updateBenchForm(form));
     }

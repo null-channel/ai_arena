@@ -141,7 +141,7 @@ pub(in crate::server) fn render_form(
     html
 }
 
-fn render_agent(
+pub(in crate::server) fn render_agent(
     prefix: &str,
     player: u8,
     agent: &AgentFormDefaults,

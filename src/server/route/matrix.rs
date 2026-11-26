@@ -154,6 +154,19 @@ fn roster_request(fields: &HashMap<String, String>) -> Result<CreateMatrixReques
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|v| (1..=32).contains(v))
         .ok_or("Choose 1–32 concurrent matches.")?;
+    let agents = roster_agents(fields)?;
+    Ok(CreateMatrixRequest {
+        game_type: get("game_type").ok_or("Select a game.")?.to_owned(),
+        repetitions,
+        concurrency_limit: Some(concurrency),
+        agents,
+    })
+}
+
+pub(super) fn roster_agents(
+    fields: &HashMap<String, String>,
+) -> Result<Vec<crate::agent_config::AIAgentConfig>, String> {
+    let get = |key: &str| fields.get(key).map(|v| v.trim()).filter(|v| !v.is_empty());
     let mut slots: Vec<usize> = fields
         .keys()
         .filter_map(|key| {
@@ -184,12 +197,7 @@ fn roster_request(fields: &HashMap<String, String>) -> Result<CreateMatrixReques
         };
         agents.push(config.into_config()?);
     }
-    Ok(CreateMatrixRequest {
-        game_type: get("game_type").ok_or("Select a game.")?.to_owned(),
-        repetitions,
-        concurrency_limit: Some(concurrency),
-        agents,
-    })
+    Ok(agents)
 }
 
 async fn start_round_robin(

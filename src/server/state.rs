@@ -16,8 +16,8 @@ pub(super) enum ArenaMode {
 impl ArenaMode {
     pub fn run_label(self) -> &'static str {
         match self {
-            Self::Test => "Test",
-            Self::Real => "Saved",
+            Self::Test => "Practice",
+            Self::Real => "Recorded",
         }
     }
 
@@ -37,6 +37,7 @@ pub(super) struct AppState {
     pub(super) store: RunStore,
     pub(super) test_store: RunStore,
     real_mode: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) kubebench: super::kubebench::Kubebench,
     pub(super) turing: super::turing::Turing,
     pub(super) toolbench: super::toolbench::Toolbench,
     pub(super) matrix_jobs: Arc<Mutex<HashMap<String, MatrixJob>>>,
@@ -87,6 +88,7 @@ impl AppState {
             store,
             test_store: RunStore::in_memory(),
             real_mode: Default::default(),
+            kubebench: Default::default(),
             turing: Default::default(),
             toolbench: Default::default(),
             matrix_jobs: Arc::new(Mutex::new(HashMap::new())),

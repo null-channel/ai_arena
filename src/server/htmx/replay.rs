@@ -65,5 +65,5 @@ pub(in crate::server) fn render_replay_page(
     }
 
     content.push_str("</section></main>");
-    layout(arena_mode, "AI Arena Replay", &content)
+    layout(arena_mode, "AI Arena Replay", "/history", &content)
 }

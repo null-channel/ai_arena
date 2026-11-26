@@ -54,5 +54,5 @@ pub(in crate::server) fn render_index_page(
         </main>"#,
         form = render_form(profiles, defaults, mode, None, None),
     );
-    layout(arena_mode, "Console", &content)
+    layout(arena_mode, "Console", "/", &content)
 }

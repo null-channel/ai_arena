@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod htmx;
 mod jobs;
+mod kubebench;
 mod route;
 mod sessions;
 mod state;

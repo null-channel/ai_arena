@@ -1,44 +1,75 @@
 use crate::server::{sessions::GameStatus, state::ArenaMode};
 
-pub(in crate::server) fn layout(mode: ArenaMode, title: &str, content: &str) -> String {
-    let mode_key = mode.key();
-    let (checked, status) = match mode {
-        ArenaMode::Test => ("", "Test mode"),
-        ArenaMode::Real => (" checked", "Saving results"),
-    };
-    let section_name = match title {
-        "Tool Calling" | "Turing Test" => title,
-        _ => "AI Games",
-    };
-    let in_games = section_name == "AI Games";
-    let game_nav = if in_games {
-        let view = match title {
-            "Run history" | "Leaderboard" => title,
-            _ => "Console",
-        };
-        let mut links = String::new();
-        for (href, label) in [
+struct Section {
+    name: &'static str,
+    views: &'static [(&'static str, &'static str)],
+}
+
+const SECTIONS: &[Section] = &[
+    Section {
+        name: "AI Games",
+        views: &[
             ("/", "Console"),
             ("/history", "Run history"),
             ("/rankings", "Leaderboard"),
-        ] {
-            let active = if label == view {
-                r#" aria-current="page""#
-            } else {
-                ""
-            };
-            links.push_str(&format!(r#"<a href="{href}"{active}>{label}</a>"#));
-        }
-        format!(r#"<nav class="game-views" aria-label="Game views">{links}</nav>"#)
+        ],
+    },
+    Section {
+        name: "Tool Calling",
+        views: &[
+            ("/toolbench", "Console"),
+            ("/toolbench/history", "Run history"),
+        ],
+    },
+    Section {
+        name: "KubeBench",
+        views: &[
+            ("/kubebench", "Console"),
+            ("/kubebench/history", "Run history"),
+        ],
+    },
+    Section {
+        name: "Turing Test",
+        views: &[
+            ("/turing", "Console"),
+            ("/turing/scores", "Viewer standings"),
+        ],
+    },
+];
+
+pub(in crate::server) fn layout(
+    mode: ArenaMode,
+    title: &str,
+    view_path: &str,
+    content: &str,
+) -> String {
+    let mode_key = mode.key();
+    let checked = if mode == ArenaMode::Real {
+        " checked"
     } else {
-        String::new()
+        ""
     };
+    let section = SECTIONS
+        .iter()
+        .skip(1)
+        .find(|section| view_path.split('/').nth(1) == section.views[0].0.split('/').nth(1))
+        .unwrap_or(&SECTIONS[0]);
+    let section_name = section.name;
+    let mut links = String::new();
+    for &(href, label) in section.views {
+        let active = if href == view_path {
+            r#" aria-current="page""#
+        } else {
+            ""
+        };
+        links.push_str(&format!(r#"<a href="{href}"{active}>{label}</a>"#));
+    }
+    let view_nav =
+        format!(r#"<nav class="section-views" aria-label="{section_name} views">{links}</nav>"#);
     let mut sections = String::new();
-    for (path, name) in [
-        ("/", "AI Games"),
-        ("/toolbench", "Tool Calling"),
-        ("/turing", "Turing Test"),
-    ] {
+    for item in SECTIONS {
+        let name = item.name;
+        let path = item.views[0].0;
         let active = if name == section_name {
             r#" aria-current="true""#
         } else {
@@ -53,10 +84,11 @@ pub(in crate::server) fn layout(mode: ArenaMode, title: &str, content: &str) -> 
         <body><header class="topbar"><div class="topinner">
         <div class="brand-group">
             <details class="section-menu"><summary aria-label="Navigation menu"><span class="hamburger" aria-hidden="true"></span></summary>
-                <div class="section-panel"><nav aria-label="Arena sections">{sections}</nav>{game_nav}
+                <div class="section-panel"><nav aria-label="Arena sections">{sections}</nav>{view_nav}
                     <label class="theme-control" for="arena-mode">Save results
-                        <input id="arena-mode" type="checkbox"{checked}>
+                        <input id="arena-mode" type="checkbox"{checked} aria-describedby="mode-status">
                     </label>
+                    <div id="mode-status"><span data-mode="test">Testing</span><span data-mode="real">Recording</span></div>
                     <span id="mode-error" role="alert" hidden>Could not update Save results.</span>
                     <label class="theme-control" for="theme">Theme
                         <select id="theme"><option value="dark" selected>Dark</option><option value="light">Light</option><option value="system">System</option></select>
@@ -65,8 +97,7 @@ pub(in crate::server) fn layout(mode: ArenaMode, title: &str, content: &str) -> 
             </details>
             <a class="brand" href="/"><i aria-hidden="true"></i>AI Arena</a>
             <span class="section-name">{section_name}</span>
-            <span id="arena-mode-label" aria-live="polite">{status}</span>
-        </div>{game_nav}</div></header><div class="shell">{content}</div></body></html>"#,
+        </div>{view_nav}</div></header><div class="shell">{content}</div></body></html>"#,
         html_escape(title)
     )
 }

@@ -9,7 +9,7 @@ use askama::Template;
 use axum::{
     Form, Json, Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware,
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -76,7 +76,12 @@ async fn setup(
     }
     .render()
     .map_err(internal)?;
-    Ok(Html(layout(state.mode(), "Tool Calling", &content)))
+    Ok(Html(layout(
+        state.mode(),
+        "Tool Calling",
+        "/toolbench",
+        &content,
+    )))
 }
 
 #[derive(serde::Deserialize)]
@@ -97,9 +102,24 @@ async fn index(State(state): State<AppState>) -> Result<Html<String>, AppError> 
     setup(&state, &Settings::default(), "").await
 }
 
-async fn history(State(state): State<AppState>) -> Result<Html<String>, AppError> {
+async fn history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Html<String>, AppError> {
     let runs = state.toolbench.history().await.map_err(internal)?;
-    Ok(Html(History { runs: &runs }.render().map_err(internal)?))
+    let list = History { runs: &runs }.render().map_err(internal)?;
+    if headers.contains_key("HX-Request") {
+        return Ok(Html(list));
+    }
+    let content = format!(
+        r#"<main class="panel" hx-history="false"><h1>Run history</h1><div class="activity" hx-get="/toolbench/history" hx-trigger="every 5s">{list}</div></main>"#
+    );
+    Ok(Html(layout(
+        state.mode(),
+        "Tool Calling · Run history",
+        "/toolbench/history",
+        &content,
+    )))
 }
 
 async fn start(
@@ -151,7 +171,12 @@ async fn detail(
     }
     .render()
     .map_err(internal)?;
-    Ok(Html(layout(state.mode(), "Tool Calling", &content)))
+    Ok(Html(layout(
+        state.mode(),
+        "Tool Calling",
+        "/toolbench/history",
+        &content,
+    )))
 }
 
 fn internal(error: impl std::fmt::Display) -> AppError {

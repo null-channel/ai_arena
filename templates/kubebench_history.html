@@ -1,0 +1,12 @@
+<main class="panel" hx-history="false">
+    <h1>Run history</h1>
+    <div id="kube-history" hx-get="/kubebench/history" hx-trigger="every 10s" hx-select="#kube-history" hx-swap="outerHTML">
+        {% for run in runs %}
+        <a class="recent-run" href="/kubebench/{{ run.id }}">
+            <strong>{{ run.kind() }} · {{ run.model }}</strong>
+            {% if run.matrix %}<small>{% for row in run.rows() %}{{ row[0].agent }}{% if !loop.last %} · {% endif %}{% endfor %}</small>{% endif %}
+            <small><time data-bench-time="{{ run.started.timestamp() }}">{{ run.started }}</time> · {{ run.mode.run_label() }} · {{ run.phase }} · {{ run.completed() }}/{{ run.cases.len() }} complete · {{ run.passed() }} passed</small>
+        </a>
+        {% else %}<p class="empty">No KubeBench runs yet.</p>{% endfor %}
+    </div>
+</main>

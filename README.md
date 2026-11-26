@@ -117,11 +117,40 @@ Form changes are cached in memory while the server is running and reused as defa
 
 Open `http://127.0.0.1:3000/` to choose Single, Multi, or Matrix. All three modes accept custom model names. The provider and model determine which settings appear. For example, Ollama exposes its endpoint and temperature, while Anthropic uses the model’s sampling defaults. Axum serves the UI and its assets directly.
 
-### Saving results
+### Practice and recorded runs
 
-The **Save results** checkbox in the navigation menu starts unchecked on every server launch. Leave it unchecked for **Test mode** (green), or check it to save new results (red). The setting is shared across browser tabs. Each game, batch, Tool Calling benchmark, and Turing Test round keeps the setting it started with.
+The **Save results** checkbox in the navigation menu starts unchecked on every server launch. Leave it unchecked for **Practice** (green), or check it for **Recorded** (red). The setting is shared across browser tabs. Each game, batch, Tool Calling benchmark, KubeBench run, and Turing Test round keeps the setting it started with.
 
-Test games and benchmark reports stay in memory. Test rounds reveal their votes on screen. Only saved runs contribute to saved history, game rankings, and viewer standings. Tool Calling uses the runner’s `--no-save` option in Test mode. Select **Offline mock** separately when you want to avoid model calls.
+Practice games and benchmark reports stay in memory. Practice rounds reveal their votes on screen. Only saved runs contribute to saved history, game rankings, and viewer standings. Tool Calling uses the runner’s `--no-save` option for practice runs. Select **Offline mock** separately when you want to avoid model calls.
+
+### KubeBench
+
+Open **KubeBench** at `/kubebench`, choose an agent, and select a task or the full catalog. The machine running Arena needs a running Docker daemon and `kind` and `kubectl` on its PATH. Arena creates a fresh kind cluster for each task, seeds its `benchmark` namespace, and gives the agent the goal and observed resources. After the agent submits one structured action, Arena grades the live state and deletes the cluster. Setup and cleanup are visible on the run page.
+
+**Matrix** (`/kubebench/matrix`) runs every selected agent against every checked task once. Two agents and three tasks produce six runs. The server processes one pairing at a time per matrix and keeps going when you close the tab. Open a cell in the results table to see the action and grading evidence.
+
+**Run history** (`/kubebench/history`) lists Single and Matrix runs, newest first. Practice runs are visible for the current server session. With **Save results** checked at launch, matrix progress is saved as the run proceeds. If the server stops, the history entry shows the interrupted matrix and the results recorded so far.
+
+#### Private task catalog
+
+Keep private tasks in `../kubebench-tasks/`, a sibling of the Arena checkout. To use another directory, set `ARENA_KUBEBENCH_TASKS` before starting the server. The picker reloads the catalog when opened, and each run takes a snapshot of its selected definitions at launch. To try the public example on its own, run this from the checkout:
+
+```bash
+ARENA_KUBEBENCH_TASKS="$PWD/examples/kubebench" cargo run -- serve
+```
+
+Each task is one JSON file. Its filename without the extension is the task ID. Use letters, digits, hyphens or underscores. The ID `all` selects the full catalog. Start with [the public example](examples/kubebench/example-quota.json).
+
+| Field | Meaning |
+| --- | --- |
+| `title`, `goal` | Picker label and the instruction sent to the agent |
+| `cluster.workers` | Number of worker nodes in addition to one control plane, from zero (default) to three |
+| `resources` | Kubernetes manifests for Deployments, Services, Pods and ResourceQuotas. Omit `metadata.namespace`. For a fixture container, `$KUBEBENCH_PAUSE_IMAGE` selects the kind node’s sandbox image. |
+| `checks` | All checks must pass. A `field` check compares a JSON pointer on a named observed resource to `equals`. A `ready_endpoints` check matches a Service’s ready endpoint identities to the Pods with the specified `pod_labels`. |
+
+The agent can scale a Deployment (0–5 replicas), update a Service’s `app` or `track` selector, or set a `configmaps`, `pods` or `services` quota (0–10). Field checks use the same observations the agent receives: `desired`, `available` and `podLabels` for Deployments, `selector` for Services, `hard` for quotas, `labels` and `uid` for Pods, and `service` and `endpoints` for EndpointSlices.
+
+Practice reports stay in memory. With **Save results** checked, reports go to the local data directory under `ai-arena/kubebench/` (normally `~/.local/share/ai-arena/kubebench/` on Linux). Set `ARENA_KUBEBENCH_RESULTS` to change the directory. If the Arena process is killed during a task, its run-specific `kb-…` cluster can remain. Use `kind get clusters` to identify it and `kind delete cluster --name <name>` to remove it.
 
 ### Tool Calling
 

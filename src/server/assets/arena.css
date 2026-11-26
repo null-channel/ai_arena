@@ -2,7 +2,9 @@
     color-scheme: dark;
     --ink: light-dark(#191b18, #eeeee6);
     --muted: light-dark(#575e53, #a4aaa0);
-    --accent: light-dark(#496209, #c7f464);
+    --practice: light-dark(#496209, #c7f464);
+    --recorded: light-dark(#a02e29, #ff8980);
+    --accent: var(--practice);
     --line: light-dark(#d0d3c9, #353934);
     --subtle: light-dark(#eeefe9, #171a18);
     --paper: light-dark(#f8f8f2, #090a0a);
@@ -17,11 +19,13 @@
     background: var(--paper);
 }
 :root[data-mode="real"] {
-    --accent: light-dark(#a02e29, #ff8980);
+    --accent: var(--recorded);
     --accent-hover: light-dark(#84231f, #ffaaa4);
     --accent-tint: light-dark(#fae8e6, #352221);
 }
-#arena-mode-label { white-space: nowrap; text-transform: uppercase; font: 650 .7rem var(--mono); color: var(--accent); border: 1px solid currentColor; border-radius: 2px; padding: 3px 6px; }
+#mode-status { padding: 0 10px; font-size: .78rem; color: var(--accent); }
+:root[data-mode="test"] #mode-status [data-mode="real"],
+:root[data-mode="real"] #mode-status [data-mode="test"] { display: none; }
 #mode-error { font-size: .8rem; padding: 6px; }
 @media (max-width: 440px) { .brand-group { flex-wrap: wrap; gap: 6px; } }
 :root[data-theme="system"] { color-scheme: light dark; }
@@ -51,7 +55,7 @@ h3, legend { font-size: 1.08rem; font-weight: 720; }
 .brand i { height: 27px; width: 27px; border: 1px solid var(--accent); background: repeating-conic-gradient(var(--accent) 0 25%, transparent 0 50%) center / 16px 16px; }
 .brand-group { display: flex; align-items: center; gap: 12px; }
 .section-name { padding-left: 12px; border-left: 1px solid var(--line); color: var(--accent); font-weight: 650; }
-.topinner > .game-views { margin-left: auto; }
+.topinner > .section-views { margin-left: auto; }
 details.section-menu { position: relative; margin: 0; }
 .section-menu summary { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid transparent; border-radius: 2px; color: var(--ink); list-style: none; }
 .section-menu summary::-webkit-details-marker { display: none; }
@@ -66,7 +70,7 @@ details.section-menu { position: relative; margin: 0; }
 .topinner nav a[aria-current]::before { content: ""; width: 5px; height: 5px; margin-right: 7px; border-radius: 50%; background: var(--accent); }
 .section-panel nav { display: grid; gap: 2px; }
 .section-panel a { min-height: 40px; }
-.section-panel .game-views { display: none; }
+.section-panel .section-views { display: none; }
 .shell { padding: 28px 0 72px; }
 .grid { display: grid; grid-template-columns: minmax(0, 2.15fr) minmax(245px, 1fr); gap: 22px; align-items: start; }
 .stack { display: grid; gap: 20px; min-width: 0; }
@@ -180,8 +184,8 @@ pre { padding: 12px; border-radius: 2px; background: var(--subtle); overflow: au
 }
 @media (max-width: 800px) {
     .topinner { gap: 8px; }
-    .topinner > .game-views { display: none; }
-    .section-panel .game-views { display: grid; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
+    .topinner > .section-views { display: none; }
+    .section-panel .section-views { display: grid; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
 }
 @media (max-width: 600px) {
     .shell { padding-top: 16px; }

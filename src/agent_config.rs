@@ -144,87 +144,56 @@ pub fn build_agents(configs: Vec<AIAgentConfig>, secrets: Option<&SecretsManager
     configs
         .into_iter()
         .enumerate()
-        .map(|(i, cfg)| {
-            let secret_profile = cfg.secret_profile.as_deref().unwrap_or("default");
-            let custom_prompt = load_prompt_file(cfg.prompt_file.as_deref());
-            println!("AgentConfig: Building agent {} with secret_profile: '{}'", i, secret_profile);
-            let temperature = cfg.agent.supports_temperature(&cfg.model).then_some(cfg.temp);
-            match cfg.agent {
-                AgentKind::OpenAI => {
-                    let name = format!("OpenAI_{}", i + 1);
-                    // Try secrets first:
-                    // 1. secrets.openai.<profile>.api_key
-                    // 2. openai.<profile>.api_key
-                    // 3. secrets.openai.<profile> (if value is string)
-                    // 4. openai.<profile> (if value is string)
-                    // 5. <profile> (if value is string, legacy support for top-level keys)
-                    let key_path_1 = format!("secrets.openai.{}.api_key", secret_profile);
-                    let key_path_2 = format!("openai.{}.api_key", secret_profile);
-                    let key_path_3 = format!("secrets.openai.{}", secret_profile);
-                    let key_path_4 = format!("openai.{}", secret_profile);
-                    println!("secret profile: {}", secret_profile);
-                    let api_key = secrets_manager.get(&key_path_1)
-                        .or_else(|| secrets_manager.get(&key_path_2))
-                        .or_else(|| secrets_manager.get(&key_path_3))
-                        .or_else(|| secrets_manager.get(&key_path_4))
-                        .or_else(|| secrets_manager.get(secret_profile))
-                        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-                        .expect("Failed to resolve OpenAI API key (check secrets or OPENAI_API_KEY env var)");
-
-                    AIAgent::OpenAI(OpenAIAgent::new(&name, &cfg.model, &api_key, temperature, custom_prompt).expect("create openai agent"))
-                }
-                AgentKind::Anthropic => {
-                    let name = format!("Anthropic_{}", i + 1);
-                    let key_path_1 = format!("secrets.anthropic.{}.api_key", secret_profile);
-                    let key_path_2 = format!("anthropic.{}.api_key", secret_profile);
-                    let key_path_3 = format!("secrets.anthropic.{}", secret_profile);
-                    let key_path_4 = format!("anthropic.{}", secret_profile);
-
-                    let key = secrets_manager.get(&key_path_1)
-                        .or_else(|| secrets_manager.get(&key_path_2))
-                        .or_else(|| secrets_manager.get(&key_path_3))
-                        .or_else(|| secrets_manager.get(&key_path_4))
-                        .or_else(|| secrets_manager.get(secret_profile))
-                        .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
-                        .expect("Failed to resolve Anthropic API key (check secrets or ANTHROPIC_API_KEY env var)");
-
-                    AIAgent::Anthropic(
-                        AnthropicAgent::new(&name, &cfg.model, &key, custom_prompt)
-                            .expect("create anthropic agent"),
-                    )
-                }
-                AgentKind::Gemini => {
-                    let name = format!("Gemini_{}", i + 1);
-                    let key_path_1 = format!("secrets.gemini.{}.api_key", secret_profile);
-                    let key_path_2 = format!("gemini.{}.api_key", secret_profile);
-                    let key_path_3 = format!("secrets.gemini.{}", secret_profile);
-                    let key_path_4 = format!("gemini.{}", secret_profile);
-
-                    let key = secrets_manager.get(&key_path_1)
-                        .or_else(|| secrets_manager.get(&key_path_2))
-                        .or_else(|| secrets_manager.get(&key_path_3))
-                        .or_else(|| secrets_manager.get(&key_path_4))
-                        .or_else(|| secrets_manager.get(secret_profile))
-                        .or_else(|| std::env::var("GEMINI_API_KEY").ok())
-                        .expect("Failed to resolve Gemini API key (check secrets or GEMINI_API_KEY env var)");
-
-                    AIAgent::Gemini(
-                        GeminiAgent::new(&name, &cfg.model, &key, temperature, custom_prompt)
-                            .expect("create gemini agent"),
-                    )
-                }
-                AgentKind::Ollama => {
-                    let name = format!("Ollama_{}", i + 1);
-                    let base_url = cfg.api_endpoint.expect("Expected an API endpoint.");
-
-                    AIAgent::Ollama(
-                        OllamaAgent::new(&name, &cfg.model, base_url, cfg.temp, custom_prompt)
-                            .expect("create ollama agent"),
-                    )
-                }
-            }
-        })
+        .map(|(i, cfg)| build_agent(i, cfg, secrets_manager).expect("create agent"))
         .collect()
+}
+
+pub fn build_agent(
+    index: usize,
+    cfg: AIAgentConfig,
+    secrets: &SecretsManager,
+) -> Result<AIAgent, String> {
+    let name = format!("{:?}_{}", cfg.agent, index + 1);
+    let prompt = load_prompt_file(cfg.prompt_file.as_deref());
+    if cfg.agent == AgentKind::Ollama {
+        let endpoint = cfg.api_endpoint.ok_or("Set the Ollama endpoint.")?;
+        return OllamaAgent::new(name, cfg.model, endpoint, cfg.temp, prompt)
+            .map(AIAgent::Ollama)
+            .map_err(|e| e.to_string());
+    }
+    let provider = format!("{:?}", cfg.agent).to_ascii_lowercase();
+    let profile = cfg.secret_profile.as_deref().unwrap_or("default");
+    let env_key = format!("{}_API_KEY", provider.to_ascii_uppercase());
+    let key = [
+        format!("secrets.{provider}.{profile}.api_key"),
+        format!("{provider}.{profile}.api_key"),
+        format!("secrets.{provider}.{profile}"),
+        format!("{provider}.{profile}"),
+        profile.to_owned(),
+    ]
+    .iter()
+    .find_map(|path| secrets.get(path))
+    .or_else(|| std::env::var(&env_key).ok())
+    .ok_or_else(|| {
+        format!("No {provider} key for profile {profile}. Check Arena secrets or {env_key}.")
+    })?;
+    let temperature = cfg
+        .agent
+        .supports_temperature(&cfg.model)
+        .then_some(cfg.temp);
+    match cfg.agent {
+        AgentKind::OpenAI => {
+            OpenAIAgent::new(name, &cfg.model, key, temperature, prompt).map(AIAgent::OpenAI)
+        }
+        AgentKind::Anthropic => {
+            AnthropicAgent::new(name, &cfg.model, key, prompt).map(AIAgent::Anthropic)
+        }
+        AgentKind::Gemini => {
+            GeminiAgent::new(name, &cfg.model, key, temperature, prompt).map(AIAgent::Gemini)
+        }
+        AgentKind::Ollama => unreachable!(),
+    }
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

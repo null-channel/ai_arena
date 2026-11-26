@@ -1,0 +1,22 @@
+{
+  "title": "Reserve Service capacity",
+  "goal": "Allow four Services in this namespace and keep the existing Pod limit.",
+  "cluster": { "workers": 0 },
+  "resources": [
+    {
+      "apiVersion": "v1",
+      "kind": "ResourceQuota",
+      "metadata": { "name": "example-capacity" },
+      "spec": { "hard": { "services": "1", "pods": "6" } }
+    }
+  ],
+  "checks": [
+    {
+      "check": "field",
+      "kind": "ResourceQuota",
+      "name": "example-capacity",
+      "path": "/hard",
+      "equals": { "services": "4", "pods": "6" }
+    }
+  ]
+}

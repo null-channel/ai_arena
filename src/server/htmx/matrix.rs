@@ -82,5 +82,5 @@ pub(in crate::server) fn render_batch_page(
         html_escape(game),
         sessions.len()
     );
-    layout(arena_mode, label, &content)
+    layout(arena_mode, label, "/", &content)
 }

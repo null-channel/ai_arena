@@ -58,6 +58,7 @@ pub(in crate::server) fn build_router(
                 .route_layer(middleware::from_fn(super::private_response)),
         )
         .merge(games::routes())
+        .merge(super::kubebench::routes())
         .merge(super::toolbench::routes())
         .merge(super::turing::routes())
         .merge(matrix::routes())

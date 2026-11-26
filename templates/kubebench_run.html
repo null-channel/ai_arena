@@ -1,0 +1,26 @@
+<main class="stack" hx-history="false">
+    <a class="back-link" href="/kubebench/history">← Run history</a>
+    <section class="panel stack" id="kube-run"{% if run.running %} hx-get="/kubebench/{{ run.id }}" hx-trigger="every 2s" hx-select="#kube-run" hx-swap="outerHTML"{% endif %}>
+        <div class="panel-heading"><div><p class="eyebrow">{{ run.mode.run_label() }} benchmark · {{ run.cluster }}</p><h2>{{ run.model }}</h2></div>
+            <strong>{{ run.passed() }} / {{ run.tested() }} graded tasks passed</strong></div>
+        {% if run.matrix %}<p>{{ run.completed() }} / {{ run.cases.len() }} runs complete</p>{% endif %}
+        <p class="session-id" role="status">{{ run.phase }}</p>
+        {% if !run.error.is_empty() %}<p class="notice failure" role="alert">{{ run.error }}</p>{% endif %}
+        {% if run.matrix && !run.cases.is_empty() %}
+        {% let rows = run.rows() %}
+        <div class="table-scroll"><table aria-label="Results by agent and task">
+            <thead><tr><th scope="col">Agent</th>{% for case in rows[0] %}<th scope="col">{{ case.title }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for row in rows %}{% let offset = loop.index0 * row.len() %}<tr><th scope="row">{{ row[0].agent }}</th>
+                {% for case in *row %}<td><a href="#case-{{ offset + loop.index }}">{{ case.status }}</a></td>{% endfor %}
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        {% endif %}
+        {% for case in run.cases %}<article class="session-card" id="case-{{ loop.index }}">
+            {% if !case.agent.is_empty() %}<p class="eyebrow">{{ case.agent }}</p>{% endif %}
+            <div class="session-top"><h3>{% if case.title.is_empty() %}{{ case.task }}{% else %}{{ case.title }}{% endif %}</h3><span class="badge">{{ case.status }}</span></div>
+            {% if !case.goal.is_empty() %}<p>{{ case.goal }}</p>{% endif %}
+            {% if !case.action.is_empty() %}<pre>{{ case.action }}</pre>{% endif %}
+            {% if !case.evidence.is_empty() %}<p>{{ case.evidence }}</p>{% endif %}
+        </article>{% endfor %}
+    </section>
+</main>

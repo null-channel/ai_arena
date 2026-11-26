@@ -24,3 +24,6 @@ target
 # Added by cargo
 
 /target
+
+# Local KubeBench catalog if placed under the checkout
+/kubebench-tasks/
