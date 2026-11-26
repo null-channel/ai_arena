@@ -53,6 +53,7 @@ pub(in crate::server) fn build_router(
         )
         .route("/api/health", get(health_check))
         .merge(games::routes())
+        .merge(super::toolbench::routes())
         .merge(matrix::routes())
         .merge(leaderboard::routes())
         .merge(runs::routes())

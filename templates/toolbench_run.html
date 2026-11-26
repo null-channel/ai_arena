@@ -1,0 +1,19 @@
+<main class="stack" hx-history="false">
+    <a class="back-link" href="/toolbench">← Tool Calling</a>
+    <section class="panel" id="bench-result"{% if running %} hx-get="/toolbench/{{ run.id }}" hx-trigger="every 2s" hx-select="#bench-result" hx-swap="outerHTML"{% endif %}>
+        <div class="panel-heading"><div><p class="eyebrow">Tool Calling</p><h2>{{ run.settings.label() }}</h2><p class="session-id">{{ run.id }}</p></div>
+            <span class="badge {{ badge }}">{{ run.status.label() }}</span></div>
+        <p class="recent-game">{% if run.settings.subset.is_empty() %}All families{% else %}{{ run.settings.subset }}{% endif %} · {% if run.settings.lite %}Lite tool set{% else %}Full tool set{% endif %}</p>
+        {% if running %}<p role="status">{% if progress.total > 0 %}{{ progress.done }} of {{ progress.total }} cases scored{% else %}Waiting for scores…{% endif %}</p>{% endif %}
+        {% if !error.is_empty() %}<p class="notice failure" role="alert">{{ error }}</p>{% endif %}
+        {% if let Some(report) = report %}
+        <p class="session-id">{{ report.generated_at }}</p>
+        <div class="table-scroll"><table><caption>Model scores</caption><thead><tr><th>Model</th><th>Accuracy</th><th>Passed</th><th>Wrong tool</th><th>Incomplete</th><th>Wrong order</th><th>No call</th><th>Error</th></tr></thead><tbody>
+        {% for score in report.models %}<tr><td>{{ score.model }}</td><td>{{ "{:.1}"|format(score.accuracy * 100.0) }}%</td><td>{{ score.pass }} / {{ score.total }}</td><td>{{ score.wrong_tool }}</td><td>{{ score.incomplete }}</td><td>{{ score.wrong_order }}</td><td>{{ score.no_tool_called }}</td><td>{{ score.error }}</td></tr>{% endfor %}
+        </tbody></table></div>
+        <details><summary>Case results ({{ report.cases.len() }})</summary><div class="table-scroll"><table><thead><tr><th>Case</th><th>Model</th><th>Outcome</th><th>Expected tools</th><th>Selected tools</th></tr></thead><tbody>
+        {% for case in report.cases %}<tr><td>{{ case.test_id }}</td><td>{{ case.model }}</td><td>{{ case.outcome.replace("_", " ") }}</td><td>{{ case.expected_tools.join(", ") }}</td><td>{% if case.all_picks.is_empty() %}—{% else %}{{ case.all_picks.join(", ") }}{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div></details>
+        {% endif %}
+    </section>
+</main>

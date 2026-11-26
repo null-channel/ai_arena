@@ -1,0 +1,11 @@
+models = [
+    "anthropic:claude-haiku-4-5",
+    "anthropic:claude-sonnet-4-6",
+    "anthropic:claude-opus-4-7",
+    "gemini:gemini-2.5-flash",
+    "ollama:qwen3",
+    "ollama:qwen3.6:latest",
+    "openai:gpt-4.1",
+    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
+]

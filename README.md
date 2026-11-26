@@ -117,6 +117,23 @@ Form changes are cached in memory while the server is running and reused as defa
 
 Open `http://127.0.0.1:3000/` to choose Single, Multi, or Matrix. All three modes accept custom model names. The provider and model determine which settings appear. For example, Ollama exposes its endpoint and temperature, while Anthropic uses the model’s sampling defaults. Axum serves the UI and its assets directly.
 
+### Tool Calling
+
+Open **Tool Calling** at `/toolbench`. Use **Add model** to build a comparison. Choose **Custom model** to add a model once or save it to the picker for future runs. **Edit model IDs** accepts a pasted list of `provider:model` names. Select **Offline mock** to exercise the runner without provider calls. An empty family filter selects the whole dataset. Key profiles use toolbench's named keys (for example `openai=work,anthropic=personal`), with its usual provider environment variables as the fallback. Unattended runs require credentials that toolbench can read without prompting.
+
+Each launch runs the sibling `toolbench run` with uploads disabled. Open a run to see progress, per-model accuracy and failure counts, and the expected and selected tools for each case. Benchmark history survives server restarts.
+
+| Server environment variable | Default |
+| --- | --- |
+| `ARENA_TOOLBENCH_MODELS` | User config directory under `ai_arena/toolbench-models.toml` (on Linux, `~/.config/ai_arena/toolbench-models.toml` by default) |
+| `ARENA_TOOLBENCH_BIN` | Sibling `../tool_call_tests/target/{release,debug}/toolbench`, then `toolbench` on PATH |
+| `ARENA_TOOLBENCH_DATA` | Sibling `../tool-call-test-data`, containing `tools/` and `test_cases/` |
+| `ARENA_TOOLBENCH_RESULTS` | User-local data directory under `ai-arena/toolbench/` (on Linux, `~/.local/share/ai-arena/toolbench/` by default) |
+
+The picker starts with Arena presets. **Save & add** writes the full list to the local TOML file. You can also edit its `models` array directly. Presets are model IDs for the runner’s providers. Availability depends on provider access or which Ollama models are installed.
+
+Build the runner in its own checkout with `cargo build --bin toolbench` if needed. Keep the dataset external. Each run gets its own external directory for its report, call log, runner diagnostics and local bundle. Arena's game database stores game results only.
+
 ### DuckDB Run History
 
 All game runs are stored in DuckDB. By default the database file is `./ai_arena.duckdb`, relative to the current working directory. Use `--db-path` on `run`, `batch`, or `serve` to choose a different file.

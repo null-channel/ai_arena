@@ -1,0 +1,3 @@
+{% for run in runs %}
+<a class="recent-run" href="/toolbench/{{ run.id }}"><strong>{{ run.settings.label() }}</strong><small>{{ run.status.label() }} · {% if run.settings.subset.is_empty() %}All families{% else %}{{ run.settings.subset }}{% endif %} · <time data-bench-time="{{ run.started }}">{{ run.id }}</time></small></a>
+{% else %}<p class="empty">No benchmark runs yet.</p>{% endfor %}

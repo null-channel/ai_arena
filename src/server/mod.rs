@@ -6,6 +6,7 @@ mod jobs;
 mod route;
 mod sessions;
 mod state;
+mod toolbench;
 
 #[cfg(test)]
 mod test;

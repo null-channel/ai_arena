@@ -5,6 +5,7 @@ mod matrix;
 mod router;
 mod runs;
 mod secrets;
+mod toolbench;
 mod websocket;
 
 pub(super) use router::build_router;

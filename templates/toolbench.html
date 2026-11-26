@@ -1,0 +1,44 @@
+<main class="grid" hx-history="false">
+    <section class="panel setup">
+        <div class="panel-heading"><h1>Tool Calling</h1></div>
+        <form class="bench-form" method="post" action="/toolbench">
+            {% if !error.is_empty() %}<p role="alert" class="notice failure">{{ error }}</p>{% endif %}
+            <fieldset class="bench-models">
+                <legend>Models</legend>
+                {% if !catalog_error.is_empty() %}<p class="notice failure" role="alert">{{ catalog_error }}</p>{% endif %}
+                <div data-model-picker hidden>
+                    <ul class="model-chips" aria-label="Selected models"></ul>
+                    <select data-add-model aria-label="Add model">
+                        <option value="">Add model…</option>
+                        <optgroup label="Saved models">{% for preset in presets %}<option value="{{ preset }}">{{ preset }}</option>{% endfor %}</optgroup>
+                        <option value="custom">Custom model…</option>
+                    </select>
+                    <fieldset class="custom-model" hidden>
+                        <legend>Custom model</legend>
+                        <div class="form-grid">
+                            <label>Provider <select data-custom-provider>{% for provider in providers %}<option>{{ provider }}</option>{% endfor %}</select></label>
+                            <label>Model ID <input data-custom-id placeholder="Model ID" autocomplete="off"></label>
+                        </div>
+                        <div class="actions">
+                            <button type="button" class="roster-action" data-add-custom>Add once</button>
+                            <button type="button" class="roster-action" data-save-model>Save &amp; add</button>
+                        </div>
+                        <p role="status" data-model-feedback></p>
+                    </fieldset>
+                </div>
+                <details data-model-editor open><summary>Edit model IDs</summary>
+                    <label>One per line <textarea name="models" rows="3" placeholder="openai:gpt-4.1&#10;ollama:qwen3">{{ settings.models }}</textarea></label>
+                </details>
+            </fieldset>
+            <label>Families (comma-separated) <input name="subset" placeholder="All families" value="{{ settings.subset }}"></label>
+            <label>Key profiles <input name="profiles" placeholder="Toolbench defaults" value="{{ settings.profiles }}"></label>
+            <label data-ollama-endpoint>Ollama endpoint <input name="server" type="url" placeholder="Default endpoint" value="{{ settings.server }}"></label>
+            <label class="check-option"><input type="checkbox" name="lite" value="true"{% if settings.lite %} checked{% endif %}> Lite tool set</label>
+            <label class="check-option"><input type="checkbox" name="dry_run" value="true"{% if settings.dry_run %} checked{% endif %}> Offline mock</label>
+            <button type="submit">Start benchmark</button>
+        </form>
+    </section>
+    <aside class="panel"><h2>Benchmark history</h2>
+        <div class="activity" hx-get="/toolbench/history" hx-trigger="every 5s">{% include "toolbench_history.html" %}</div>
+    </aside>
+</main>

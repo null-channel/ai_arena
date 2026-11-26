@@ -15,3 +15,5 @@ pub(super) use index::render_index_page;
 pub(super) use leaderboard::{render_leaderboard_fragment, render_rankings_page};
 pub(super) use matrix::{render_batch_activity, render_batch_page};
 pub(super) use replay::render_replay_page;
+
+pub(super) use layout::layout;
