@@ -63,7 +63,12 @@ async fn history_page(
         .game_history(&game, page)
         .await
         .map_err(AppError::Internal)?;
-    Ok(Html(htmx::render_history(game.name(), page, history)))
+    Ok(Html(htmx::render_history(
+        state.mode(),
+        game.name(),
+        page,
+        history,
+    )))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -77,18 +82,24 @@ async fn replay_page(
     Query(query): Query<ReplayQuery>,
 ) -> Result<Html<String>, AppError> {
     let run = state
-        .store
+        .game_store(&game_id)
+        .await
         .get_run(&game_id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Run not found".to_string()))?;
     let events = state
-        .store
+        .game_store(&game_id)
+        .await
         .list_turns(&game_id)
         .await
         .map_err(AppError::Internal)?;
     Ok(Html(htmx::render_replay_page(
-        &game_id, &run, &events, query.turn,
+        state.mode(),
+        &game_id,
+        &run,
+        &events,
+        query.turn,
     )))
 }
 
@@ -97,7 +108,8 @@ async fn get_stored_run(
     Path(run_id): Path<String>,
 ) -> Result<Json<crate::storage::StoredRun>, AppError> {
     let run = state
-        .store
+        .game_store(&run_id)
+        .await
         .get_run(&run_id)
         .await
         .map_err(AppError::Internal)?
@@ -110,7 +122,8 @@ async fn get_stored_run_events(
     Path(run_id): Path<String>,
 ) -> Result<Json<Vec<crate::storage::StoredTurn>>, AppError> {
     if state
-        .store
+        .game_store(&run_id)
+        .await
         .get_run(&run_id)
         .await
         .map_err(AppError::Internal)?
@@ -119,7 +132,8 @@ async fn get_stored_run_events(
         return Err(AppError::NotFound("Run not found".to_string()));
     }
     let events = state
-        .store
+        .game_store(&run_id)
+        .await
         .list_turns(&run_id)
         .await
         .map_err(AppError::Internal)?;

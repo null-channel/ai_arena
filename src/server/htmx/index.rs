@@ -1,7 +1,9 @@
 use super::{forms::render_form, layout::layout};
 use crate::server::config::{FormDefaults, RunMode};
+use crate::server::state::ArenaMode;
 
 pub(in crate::server) fn render_index_page(
+    arena_mode: ArenaMode,
     profiles: &[String],
     defaults: &FormDefaults,
     activity: &str,
@@ -52,5 +54,5 @@ pub(in crate::server) fn render_index_page(
         </main>"#,
         form = render_form(profiles, defaults, mode, None, None),
     );
-    layout("Console", &content)
+    layout(arena_mode, "Console", &content)
 }

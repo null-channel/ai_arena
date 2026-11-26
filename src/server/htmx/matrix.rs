@@ -1,17 +1,26 @@
 use super::layout::{html_escape, layout, render_status_badge};
+use crate::server::state::ArenaMode;
 use crate::{
     server::{config::RunMode, sessions::GameStatus},
     storage::{BatchSession, BatchSummary},
 };
 use std::fmt::Write;
 
-pub(in crate::server) fn render_batch_activity(mode: RunMode, batches: &[BatchSummary]) -> String {
-    if batches.is_empty() {
+pub(in crate::server) fn render_batch_activity(
+    mode: RunMode,
+    tests: &[BatchSummary],
+    batches: &[BatchSummary],
+) -> String {
+    if batches.is_empty() && tests.is_empty() {
         return "<div class=\"empty\">No batches yet.</div>".into();
     }
     let mut html = String::new();
-    for batch in batches {
-        write!(html, r#"<a class="recent-run" href="{}/{}"><strong>{}</strong><small>{} of {} sessions finished · {}</small></a>"#,
+    for (batch, label) in tests
+        .iter()
+        .map(|b| (b, ArenaMode::Test.run_label()))
+        .chain(batches.iter().map(|b| (b, ArenaMode::Real.run_label())))
+    {
+        write!(html, r#"<a class="recent-run" href="{}/{}"><strong>{}</strong><small>{label} · {} of {} sessions finished · {}</small></a>"#,
             mode.path(), html_escape(&batch.id), html_escape(&batch.game_type), batch.finished,
             batch.total, html_escape(&batch.id.chars().take(8).collect::<String>())).unwrap();
     }
@@ -19,15 +28,18 @@ pub(in crate::server) fn render_batch_activity(mode: RunMode, batches: &[BatchSu
 }
 
 pub(in crate::server) fn render_batch_page(
+    arena_mode: ArenaMode,
     mode: RunMode,
     id: &str,
     game: &str,
     sessions: &[BatchSession],
-    tracked: bool,
+    job_mode: Option<ArenaMode>,
 ) -> String {
     let id = html_escape(id);
     let path = mode.path();
     let label = mode.label();
+    let tracked = job_mode.is_some();
+    let recording = job_mode.unwrap_or(ArenaMode::Real).run_label();
     let finished = sessions
         .iter()
         .filter(|s| matches!(s.status.as_str(), "completed" | "error"))
@@ -64,11 +76,11 @@ pub(in crate::server) fn render_batch_page(
     }
     let content = format!(
         r#"<main class="stack"><a class="back-link" href="{path}">← {label} setup</a>
-        <div class="page-heading"><h1>{label} · {}</h1><p class="session-id">{id}</p></div>
+        <div class="page-heading"><h1>{label} · {}</h1><p class="session-id">{recording} · {id}</p></div>
         <section class="panel" id="batch-sessions"{poll}><div class="panel-heading"><h2>Sessions</h2><span>{finished} of {} finished</span></div>
         <div class="table-scroll"><table><thead><tr><th>Session</th><th>Matchup</th><th>Round</th><th>Status</th><th>Replay</th></tr></thead><tbody>{rows}</tbody></table></div></section></main>"#,
         html_escape(game),
         sessions.len()
     );
-    layout(label, &content)
+    layout(arena_mode, label, &content)
 }

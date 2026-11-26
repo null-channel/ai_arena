@@ -31,7 +31,7 @@ async fn handle_game_socket(socket: WebSocket, state: AppState, game_id: String)
     let (tx, mut rx) = mpsc::channel::<GameEvent>(100);
 
     // Get the game session
-    let (game, agents) = {
+    let (game, agents, mode) = {
         let mut games = state.games.lock().await;
         let session = match games.get_mut(&game_id) {
             Some(s) => s,
@@ -59,10 +59,10 @@ async fn handle_game_socket(socket: WebSocket, state: AppState, game_id: String)
         }
 
         session.status = GameStatus::Running;
-        (session.game.clone(), session.agents.clone())
+        (session.game.clone(), session.agents.clone(), session.mode)
     };
 
-    if let Err(error) = state.store.mark_running(&game_id).await {
+    if let Err(error) = state.result_store(mode).mark_running(&game_id).await {
         eprintln!(
             "Failed to mark DuckDB run {} as running: {}",
             game_id, error
@@ -83,13 +83,17 @@ async fn handle_game_socket(socket: WebSocket, state: AppState, game_id: String)
 
         match &result {
             Ok(result) => {
-                if let Err(error) = state_clone.store.complete_run(&game_id_clone, result).await {
+                if let Err(error) = state_clone
+                    .result_store(mode)
+                    .complete_run(&game_id_clone, result)
+                    .await
+                {
                     eprintln!("Failed to store DuckDB run {}: {}", game_id_clone, error);
                 }
             }
             Err(_) => {
                 if let Err(error) = state_clone
-                    .store
+                    .result_store(mode)
                     .mark_error(&game_id_clone, "game execution panicked")
                     .await
                 {

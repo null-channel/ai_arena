@@ -117,6 +117,12 @@ Form changes are cached in memory while the server is running and reused as defa
 
 Open `http://127.0.0.1:3000/` to choose Single, Multi, or Matrix. All three modes accept custom model names. The provider and model determine which settings appear. For example, Ollama exposes its endpoint and temperature, while Anthropic uses the model’s sampling defaults. Axum serves the UI and its assets directly.
 
+### Saving results
+
+The **Save results** checkbox in the navigation menu starts unchecked on every server launch. Leave it unchecked for **Test mode** (green), or check it to save new results (red). The setting is shared across browser tabs. Each game, batch, Tool Calling benchmark, and Turing Test round keeps the setting it started with.
+
+Test games and benchmark reports stay in memory. Test rounds reveal their votes on screen. Only saved runs contribute to saved history, game rankings, and viewer standings. Tool Calling uses the runner’s `--no-save` option in Test mode. Select **Offline mock** separately when you want to avoid model calls.
+
 ### Tool Calling
 
 Open **Tool Calling** at `/toolbench`. Use **Add model** to build a comparison. Choose **Custom model** to add a model once or save it to the picker for future runs. **Edit model IDs** accepts a pasted list of `provider:model` names. Select **Offline mock** to exercise the runner without provider calls. An empty family filter selects the whole dataset. Key profiles use toolbench's named keys (for example `openai=work,anthropic=personal`), with its usual provider environment variables as the fallback. Unattended runs require credentials that toolbench can read without prompting.
@@ -160,7 +166,7 @@ Use `AI` or `Human` for the source and a neutral title for viewers. Supported fi
 
 ### DuckDB Run History
 
-All game runs are stored in DuckDB. By default the database file is `./ai_arena.duckdb`, relative to the current working directory. Use `--db-path` on `run`, `batch`, or `serve` to choose a different file.
+CLI runs and web games launched with **Save results** checked are stored in DuckDB. By default the database file is `./ai_arena.duckdb`, relative to the current working directory. Use `--db-path` on `run`, `batch`, or `serve` to choose a different file.
 
 The web UI keeps active sessions in memory for live polling, then reads completed and failed run history back from DuckDB so previous runs remain visible after a server restart.
 

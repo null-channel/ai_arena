@@ -2,6 +2,7 @@
     <div class="panel-heading"><h2>{{ stage.phase }}</h2>{% if stage.seconds > 0 %}<strong class="stage-clock">{{ stage.seconds }} s</strong>{% endif %}</div>
     {% if !stage.id.is_empty() %}
     <h3>{{ stage.title }}</h3>
+    {% if stage.test_round %}<p class="board-meta">Test round · scores are temporary</p>{% endif %}
     {% if stage.kind == "text" %}<div class="stage-text">{{ stage.text }}</div>
     {% else if stage.kind == "image" %}<img class="stage-art" id="sample-{{ stage.id }}" hx-preserve src="/turing/{{ stage.id }}/media" alt="{{ stage.title }}">
     {% else if stage.kind == "audio" %}<audio controls id="sample-{{ stage.id }}" hx-preserve src="/turing/{{ stage.id }}/media"></audio>{% endif %}

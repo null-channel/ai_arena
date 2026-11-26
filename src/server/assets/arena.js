@@ -46,6 +46,52 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+document.addEventListener('DOMContentLoaded', () => {
+    const control = document.getElementById('arena-mode');
+    const label = document.getElementById('arena-mode-label');
+    const error = document.getElementById('mode-error');
+    let revision = 0;
+
+    function show(mode) {
+        document.documentElement.dataset.mode = mode;
+        control.checked = mode === 'real';
+        const status = control.checked ? 'Saving results' : 'Test mode';
+        if (label.textContent !== status) label.textContent = status;
+    }
+
+    async function refresh() {
+        if (control.disabled || document.hidden) return;
+        const request = ++revision;
+        try {
+            const response = await fetch('/api/mode', {cache: 'no-store'});
+            if (response.ok) {
+                const {mode} = await response.json();
+                if (request === revision) show(mode);
+            }
+        } catch { /* Keep the server-rendered mode while disconnected. */ }
+    }
+
+    control.addEventListener('change', async () => {
+        ++revision;
+        control.disabled = true;
+        error.hidden = true;
+        try {
+            const response = await fetch('/api/mode', {method: 'POST', body: new URLSearchParams({mode: control.checked ? 'real' : 'test'})});
+            if (!response.ok) throw new Error();
+            show((await response.json()).mode);
+        } catch {
+            show(document.documentElement.dataset.mode);
+            error.hidden = false;
+        } finally {
+            control.disabled = false;
+            refresh();
+        }
+    });
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    setInterval(refresh, 3000);
+});
+
 function updateAgent(card, providerChanged) {
     const option = card.querySelector('[data-provider]').selectedOptions[0];
     const model = card.querySelector('[data-model-input]');

@@ -1,6 +1,11 @@
-use crate::server::sessions::GameStatus;
+use crate::server::{sessions::GameStatus, state::ArenaMode};
 
-pub(in crate::server) fn layout(title: &str, content: &str) -> String {
+pub(in crate::server) fn layout(mode: ArenaMode, title: &str, content: &str) -> String {
+    let mode_key = mode.key();
+    let (checked, status) = match mode {
+        ArenaMode::Test => ("", "Test mode"),
+        ArenaMode::Real => (" checked", "Saving results"),
+    };
     let section_name = match title {
         "Tool Calling" | "Turing Test" => title,
         _ => "AI Games",
@@ -42,13 +47,17 @@ pub(in crate::server) fn layout(title: &str, content: &str) -> String {
         sections.push_str(&format!(r#"<a href="{path}"{active}>{name}</a>"#));
     }
     format!(
-        r#"<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+        r#"<!doctype html><html lang="en" data-theme="dark" data-mode="{mode_key}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
         <title>{} · AI Arena</title><meta name="color-scheme" content="dark light"><script src="/assets/arena.js"></script><link rel="stylesheet" href="/assets/arena.css">
         <script defer src="/assets/htmx.js"></script></head>
         <body><header class="topbar"><div class="topinner">
         <div class="brand-group">
             <details class="section-menu"><summary aria-label="Navigation menu"><span class="hamburger" aria-hidden="true"></span></summary>
                 <div class="section-panel"><nav aria-label="Arena sections">{sections}</nav>{game_nav}
+                    <label class="theme-control" for="arena-mode">Save results
+                        <input id="arena-mode" type="checkbox"{checked}>
+                    </label>
+                    <span id="mode-error" role="alert" hidden>Could not update Save results.</span>
                     <label class="theme-control" for="theme">Theme
                         <select id="theme"><option value="dark" selected>Dark</option><option value="light">Light</option><option value="system">System</option></select>
                     </label>
@@ -56,6 +65,7 @@ pub(in crate::server) fn layout(title: &str, content: &str) -> String {
             </details>
             <a class="brand" href="/"><i aria-hidden="true"></i>AI Arena</a>
             <span class="section-name">{section_name}</span>
+            <span id="arena-mode-label" aria-live="polite">{status}</span>
         </div>{game_nav}</div></header><div class="shell">{content}</div></body></html>"#,
         html_escape(title)
     )

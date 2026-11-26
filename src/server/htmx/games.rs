@@ -2,6 +2,7 @@ use super::{
     boards::{render_human_state, render_player_legend},
     layout::{html_escape, layout, render_status_badge},
 };
+use crate::server::state::ArenaMode;
 use crate::{
     agent_config::AIAgentConfig,
     games::{events::GameEvent, game::TestResult, stats::GameStats},
@@ -22,6 +23,7 @@ struct BattleLog<'a> {
 }
 
 pub(in crate::server) fn render_game_page(
+    arena_mode: ArenaMode,
     fragment: &str,
     parent: Option<(String, String)>,
 ) -> String {
@@ -42,7 +44,7 @@ pub(in crate::server) fn render_game_page(
         </main>
         "#,
     );
-    layout("AI Arena Game", &content)
+    layout(arena_mode, "AI Arena Game", &content)
 }
 
 pub(in crate::server) fn render_games_fragment(sessions: &[GameSummary]) -> String {
@@ -69,6 +71,7 @@ pub(in crate::server) fn render_game_fragment(
     events: &[GameEvent],
 ) -> Result<String, AppError> {
     let GameSummary {
+        mode,
         game_id,
         game_type,
         agents,
@@ -88,12 +91,13 @@ pub(in crate::server) fn render_game_fragment(
         r#"<div id="game-detail"{poll}>
             <div class="panel-heading">
                 <div>
-                    <p class="eyebrow">match detail</p>
+                    <p class="eyebrow">{} match</p>
                     <h2>{}</h2>
                     <div class="session-id">{}</div>
                 </div>
                 {}
             </div>"#,
+        mode.run_label(),
         html_escape(game_type),
         html_escape(game_id),
         render_status_badge(status)

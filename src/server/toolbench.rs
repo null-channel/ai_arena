@@ -2,6 +2,7 @@
 //! the runner; its output and Arena's run index live together outside the checkout.
 pub(super) mod catalog;
 
+use super::state::ArenaMode;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -25,6 +26,7 @@ pub(super) struct Toolbench {
     pub data: PathBuf,
     pub results: PathBuf,
     progress: Arc<Mutex<HashMap<Uuid, Progress>>>,
+    test_runs: Arc<Mutex<HashMap<Uuid, TestRun>>>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -87,15 +89,17 @@ impl Settings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Run {
+    #[serde(skip)]
+    pub test_run: bool,
     pub id: Uuid,
     pub started: u64,
     pub settings: Settings,
     pub status: Status,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) enum Status {
     Running,
     Completed,
@@ -114,14 +118,14 @@ impl Status {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct Report {
     pub generated_at: String,
     pub models: Vec<ModelScore>,
     pub cases: Vec<CaseScore>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct ModelScore {
     pub model: String,
     pub pass: usize,
@@ -134,13 +138,18 @@ pub(super) struct ModelScore {
     pub accuracy: f64,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct CaseScore {
     pub test_id: String,
     pub model: String,
     pub outcome: String,
     pub expected_tools: Vec<String>,
     pub all_picks: Vec<String>,
+}
+
+struct TestRun {
+    run: Run,
+    report: Option<Report>,
 }
 
 impl Default for Toolbench {
@@ -172,13 +181,14 @@ impl Default for Toolbench {
                         .unwrap_or_else(env::temp_dir)
                         .join("ai-arena/toolbench")
                 }),
+            test_runs: Default::default(),
             progress: Default::default(),
         }
     }
 }
 
 impl Toolbench {
-    pub async fn start(&self, settings: Settings) -> Result<Uuid, String> {
+    pub async fn start(&self, settings: Settings, mode: ArenaMode) -> Result<Uuid, String> {
         settings.validate()?;
         let data = fs::canonicalize(&self.data).await.map_err(|_| {
             "Set ARENA_TOOLBENCH_DATA to the local tool-call-test-data directory.".to_string()
@@ -188,24 +198,7 @@ impl Toolbench {
         if !tools.is_dir() || !cases.is_dir() {
             return Err("ARENA_TOOLBENCH_DATA must contain tools/ and test_cases/.".into());
         }
-        fs::create_dir_all(&self.results)
-            .await
-            .map_err(|e| format!("Cannot create the results directory: {e}"))?;
-        let root = fs::canonicalize(&self.results)
-            .await
-            .map_err(|e| e.to_string())?;
-        if root.starts_with(&data) || root.starts_with(Path::new(env!("CARGO_MANIFEST_DIR"))) {
-            return Err("Choose an ARENA_TOOLBENCH_RESULTS directory outside Arena and the private dataset.".into());
-        }
         let id = Uuid::new_v4();
-        let dir = root.join(id.to_string());
-        let mut builder = fs::DirBuilder::new();
-        #[cfg(unix)]
-        builder.mode(0o700);
-        builder.create(&dir).await.map_err(|e| e.to_string())?;
-        let stderr = fs::File::create(dir.join("runner.log"))
-            .await
-            .map_err(|e| e.to_string())?;
         let mut command = Command::new(&self.binary);
         command
             .arg("run")
@@ -214,15 +207,26 @@ impl Toolbench {
             .arg(tools)
             .arg("--test-cases-dir")
             .arg(cases)
-            .arg("--reports-dir")
-            .arg(&dir)
-            .arg("--log-path")
-            .arg(dir.join("calls.jsonl"))
             .env("NO_COLOR", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(stderr.into_std().await)
             .kill_on_drop(true);
+        let dir = if mode == ArenaMode::Real {
+            let dir = self.run_directory(&data, id).await?;
+            let stderr = fs::File::create(dir.join("runner.log"))
+                .await
+                .map_err(|e| e.to_string())?;
+            command
+                .arg("--reports-dir")
+                .arg(&dir)
+                .arg("--log-path")
+                .arg(dir.join("calls.jsonl"))
+                .stderr(stderr.into_std().await);
+            Some(dir)
+        } else {
+            command.arg("--no-save").stderr(Stdio::null());
+            None
+        };
         if settings.dry_run {
             command.arg("--dry-run");
         } else {
@@ -255,6 +259,7 @@ impl Toolbench {
             command.arg("--lite");
         }
         let mut run = Run {
+            test_run: mode == ArenaMode::Test,
             id,
             settings,
             started: SystemTime::now()
@@ -264,20 +269,24 @@ impl Toolbench {
             status: Status::Running,
         };
         let mut progress = self.progress.lock().await;
-        save(&dir, &run).await.map_err(|e| e.to_string())?;
+        self.update_run(dir.as_deref(), &run, None)
+            .await
+            .map_err(|e| e.to_string())?;
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(e) => {
                 run.status = Status::Failed(format!(
                     "Could not start toolbench: {e}. Check ARENA_TOOLBENCH_BIN."
                 ));
-                save(&dir, &run).await.map_err(|e| e.to_string())?;
+                self.update_run(dir.as_deref(), &run, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 return Ok(id);
             }
         };
         progress.insert(id, Progress::default());
         drop(progress);
-        let live = self.progress.clone();
+        let bench = self.clone();
         tokio::spawn(async move {
             let model_count = if run.settings.dry_run {
                 1
@@ -285,39 +294,103 @@ impl Toolbench {
                 run.settings.models().count()
             };
             let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+            let mut streamed_report = None;
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Some((_, total)) = progress_counter(&line)
-                    && let Some(p) = live.lock().await.get_mut(&id)
+                    && let Some(p) = bench.progress.lock().await.get_mut(&id)
                 {
                     p.done += 1;
                     p.total = total.saturating_mul(model_count);
+                } else if dir.is_none()
+                    && line.starts_with('{')
+                    && let Ok(report) = serde_json::from_str::<Report>(&line)
+                {
+                    streamed_report = Some(report);
                 }
             }
             drop(lines);
             run.status = match child.wait().await {
-                Ok(status) if status.success() => match read_report(&dir).await {
-                    Ok(report) if !report.cases.is_empty() => Status::Completed,
-                    Ok(_) => {
-                        Status::Failed("The selected dataset contained no scored cases.".into())
+                Ok(status) if status.success() => {
+                    let report = match &dir {
+                        Some(path) => read_report(path).await.map(|r| !r.cases.is_empty()),
+                        None => streamed_report
+                            .as_ref()
+                            .map(|r| !r.cases.is_empty())
+                            .ok_or_else(|| io::Error::other("Missing streamed report")),
+                    };
+                    match report {
+                        Ok(true) => Status::Completed,
+                        Ok(false) => {
+                            Status::Failed("The selected dataset contained no scored cases.".into())
+                        }
+                        Err(e) => Status::Failed(format!("Report unavailable: {e}")),
                     }
-                    Err(e) => Status::Failed(format!("Report unavailable: {e}")),
-                },
-                Ok(status) => Status::Failed(format!(
-                    "Toolbench exited with {status}. See {}.",
-                    dir.join("runner.log").display()
-                )),
+                }
+                Ok(status) => Status::Failed(match &dir {
+                    Some(path) => format!(
+                        "Toolbench exited with {status}. See {}.",
+                        path.join("runner.log").display()
+                    ),
+                    None => format!(
+                        "Toolbench exited with {status}. Check that the runner supports --no-save and the model settings are valid."
+                    ),
+                }),
                 Err(e) => Status::Failed(format!("Could not wait for toolbench: {e}")),
             };
-            if let Err(e) = save(&dir, &run).await {
+            if let Err(e) = bench
+                .update_run(dir.as_deref(), &run, streamed_report)
+                .await
+            {
                 eprintln!("Could not save toolbench status for {id}: {e}");
             }
-            live.lock().await.remove(&id);
+            bench.progress.lock().await.remove(&id);
         });
         Ok(id)
     }
 
+    async fn run_directory(&self, data: &Path, id: Uuid) -> Result<PathBuf, String> {
+        fs::create_dir_all(&self.results)
+            .await
+            .map_err(|e| format!("Cannot create the results directory: {e}"))?;
+        let root = fs::canonicalize(&self.results)
+            .await
+            .map_err(|e| e.to_string())?;
+        if root.starts_with(data) || root.starts_with(Path::new(env!("CARGO_MANIFEST_DIR"))) {
+            return Err("Choose an ARENA_TOOLBENCH_RESULTS directory outside Arena and the private dataset.".into());
+        }
+        let dir = root.join(id.to_string());
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder.create(&dir).await.map_err(|e| e.to_string())?;
+        Ok(dir)
+    }
+
+    async fn update_run(
+        &self,
+        dir: Option<&Path>,
+        run: &Run,
+        report: Option<Report>,
+    ) -> io::Result<()> {
+        if let Some(dir) = dir {
+            save(dir, run).await
+        } else {
+            self.test_runs.lock().await.insert(
+                run.id,
+                TestRun {
+                    run: run.clone(),
+                    report,
+                },
+            );
+            Ok(())
+        }
+    }
+
     pub async fn get(&self, id: Uuid) -> io::Result<(Run, Progress)> {
         let live = self.progress.lock().await;
+        if let Some(test) = self.test_runs.lock().await.get(&id) {
+            return Ok((test.run.clone(), live.get(&id).copied().unwrap_or_default()));
+        }
         let mut run: Run = serde_json::from_slice(
             &fs::read(self.results.join(id.to_string()).join("arena.json")).await?,
         )?;
@@ -348,6 +421,12 @@ impl Toolbench {
     }
 
     pub async fn report(&self, id: Uuid) -> io::Result<Report> {
+        if let Some(test) = self.test_runs.lock().await.get(&id) {
+            return test
+                .report
+                .clone()
+                .ok_or_else(|| io::Error::other("Report unavailable"));
+        }
         read_report(&self.results.join(id.to_string())).await
     }
 }
@@ -392,6 +471,7 @@ mod tests {
             binary: root.join("test-runner"),
             data: root.join("inputs"),
             results: root.join("outputs"),
+            test_runs: Default::default(),
             progress: Default::default(),
         };
         fs::create_dir_all(bench.data.join("tools")).await.unwrap();
@@ -408,44 +488,68 @@ while [ "$#" -gt 0 ]; do
         --tools-dir|--test-cases-dir) test -d "$2"; shift 2 ;;
         --log-path) log=$2; shift 2 ;;
         --reports-dir) reports=$2; shift 2 ;;
+        --no-save) ephemeral=yes; shift ;;
         --dry-run) mock=yes; shift ;;
         *) exit 2 ;;
     esac
 done
 test "$mock" = yes
-test "$log" = "$reports/calls.jsonl"
 echo '[   1/1] PASS'
-echo '{"generated_at":"today","models":[],"cases":[{"test_id":"fixture","model":"mock","outcome":"pass","expected_tools":[],"all_picks":[]}]}' > "$reports/run-test.json"
+report='{"generated_at":"today","models":[],"cases":[{"test_id":"fixture","model":"mock","outcome":"pass","expected_tools":[],"all_picks":[]}]}'
+if [ "${ephemeral:-}" = yes ]; then
+    test -z "${reports:-}${log:-}"
+    echo "$report"
+else
+    test "$log" = "$reports/calls.jsonl"
+    echo "$report" > "$reports/run-test.json"
+fi
 "#).await.unwrap();
         fs::set_permissions(&bench.binary, std::fs::Permissions::from_mode(0o700))
             .await
             .unwrap();
-        let id = bench
-            .start(Settings {
-                dry_run: true,
-                ..Default::default()
+        let mut ids = Vec::new();
+        for mode in [ArenaMode::Test, ArenaMode::Real] {
+            let id = bench
+                .start(
+                    Settings {
+                        dry_run: true,
+                        ..Default::default()
+                    },
+                    mode,
+                )
+                .await
+                .unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let (run, _) = bench.get(id).await.unwrap();
+                    match run.status {
+                        Status::Running => {
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await
+                        }
+                        Status::Completed => break,
+                        other => panic!("unexpected run status: {other:?}"),
+                    }
+                }
             })
             .await
             .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                let (run, _) = bench.get(id).await.unwrap();
-                match run.status {
-                    Status::Running => {
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await
-                    }
-                    Status::Completed => break,
-                    other => panic!("unexpected run status: {other:?}"),
-                }
+            ids.push(id);
+            assert_eq!(bench.report(id).await.unwrap().cases[0].outcome, "pass");
+            if mode == ArenaMode::Test {
+                assert!(!bench.results.exists());
+                assert!(bench.history().await.unwrap().is_empty());
             }
-        })
-        .await
-        .unwrap();
+        }
         let reopened = Toolbench {
+            test_runs: Default::default(),
             progress: Default::default(),
             ..bench
         };
-        assert_eq!(reopened.history().await.unwrap()[0].id, id);
-        assert_eq!(reopened.report(id).await.unwrap().cases[0].outcome, "pass");
+        assert!(reopened.get(ids[0]).await.is_err());
+        assert_eq!(reopened.history().await.unwrap()[0].id, ids[1]);
+        assert_eq!(
+            reopened.report(ids[1]).await.unwrap().cases[0].outcome,
+            "pass"
+        );
     }
 }

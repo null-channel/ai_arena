@@ -1,5 +1,5 @@
 use axum::{
-    Extension, Json, Router,
+    Extension, Form, Json, Router,
     extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
@@ -52,6 +52,11 @@ pub(in crate::server) fn build_router(
             }),
         )
         .route("/api/health", get(health_check))
+        .merge(
+            Router::new()
+                .route("/api/mode", get(get_mode).post(set_mode))
+                .route_layer(middleware::from_fn(super::private_response)),
+        )
         .merge(games::routes())
         .merge(super::toolbench::routes())
         .merge(super::turing::routes())
@@ -125,8 +130,30 @@ pub(super) async fn console_page(state: AppState, mode: RunMode) -> Html<String>
         None => "<p class='empty'>Select a game to see recent results.</p>".into(),
     };
     Html(htmx::render_index_page(
-        &profiles, &defaults, &activity, mode, &recent,
+        state.mode(),
+        &profiles,
+        &defaults,
+        &activity,
+        mode,
+        &recent,
     ))
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ModeSetting {
+    mode: crate::server::state::ArenaMode,
+}
+
+async fn get_mode(State(state): State<AppState>) -> Json<ModeSetting> {
+    Json(ModeSetting { mode: state.mode() })
+}
+
+async fn set_mode(
+    State(state): State<AppState>,
+    Form(setting): Form<ModeSetting>,
+) -> Json<ModeSetting> {
+    state.set_mode(setting.mode);
+    Json(setting)
 }
 
 async fn health_check() -> impl IntoResponse {

@@ -99,6 +99,7 @@ async fn dashboard(
         Err(e) => (vec![], message.unwrap_or(e)),
     };
     Ok(Html(layout(
+        state.mode(),
         "Turing Test",
         &render(Operator {
             samples,
@@ -189,7 +190,7 @@ async fn start(
 ) -> Result<Response, AppError> {
     match state
         .turing
-        .start(&form.artifact, form.review, form.voting)
+        .start(&form.artifact, form.review, form.voting, state.mode())
         .await
     {
         Ok(()) => Ok(Redirect::to("/turing").into_response()),
@@ -212,6 +213,7 @@ async fn screen(State(state): State<AppState>) -> Result<Html<String>, AppError>
         host: false,
     })?;
     Ok(Html(layout(
+        state.mode(),
         "Turing Test",
         &format!(r#"<main class="turing-screen">{content}</main>"#),
     )))
@@ -267,6 +269,7 @@ async fn scores(
         .await
         .map_err(|e| AppError::Internal(format!("Cannot read viewer scores: {e}")))?;
     Ok(Html(layout(
+        state.mode(),
         "Turing Test",
         &render(Standings {
             total: rows.iter().map(|s| s.total).sum(),

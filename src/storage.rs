@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use duckdb::{Connection, params};
@@ -15,8 +15,13 @@ pub const DEFAULT_DB_PATH: &str = "ai_arena.duckdb";
 
 #[derive(Clone, Debug)]
 pub struct RunStore {
-    path: Arc<PathBuf>,
-    lock: Arc<Mutex<()>>,
+    backend: Arc<Mutex<Database>>,
+}
+
+#[derive(Debug)]
+enum Database {
+    File(PathBuf),
+    Memory(Option<Connection>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -165,8 +170,13 @@ impl RunMetadata {
 impl RunStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self {
-            path: Arc::new(path.into()),
-            lock: Arc::new(Mutex::new(())),
+            backend: Arc::new(Mutex::new(Database::File(path.into()))),
+        }
+    }
+
+    pub fn in_memory() -> Self {
+        Self {
+            backend: Arc::new(Mutex::new(Database::Memory(None))),
         }
     }
 
@@ -176,7 +186,7 @@ impl RunStore {
 
     pub async fn initialize(&self) -> Result<(), String> {
         self.with_connection(|conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             Ok(())
         })
         .await
@@ -201,8 +211,8 @@ impl RunStore {
     ) -> Result<Vec<String>, String> {
         let game_type = game.name().to_owned();
         let game_config_json = to_json_string(game)?;
-        self.with_connection(move |mut conn| {
-            ensure_schema(&conn)?;
+        self.with_connection(move |conn| {
+            ensure_schema(conn)?;
             let tx = conn.transaction().map_err(|err| err.to_string())?;
             let mut ids = Vec::with_capacity(runs.len());
             {
@@ -228,7 +238,7 @@ impl RunStore {
         let run_id = run_id.to_string();
         let started_at = now_timestamp();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             conn.execute(
                 "UPDATE runs SET status = 'running', started_at = COALESCE(started_at, ?2)
                  WHERE id = ?1",
@@ -245,7 +255,7 @@ impl RunStore {
         let result = result.clone();
         let finished_at = now_timestamp();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let stats = result.stats();
             let status = if result.error().is_some() {
                 "error"
@@ -317,7 +327,7 @@ impl RunStore {
         let run_id = run_id.to_string();
         let turn = turn.clone();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let sequence: i64 = conn
                 .query_row(
                     "SELECT COALESCE(MAX(seq), -1) + 1 FROM run_turns WHERE run_id = ?1",
@@ -355,7 +365,7 @@ impl RunStore {
         let error = error.to_string();
         let finished_at = now_timestamp();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             conn.execute(
                 "UPDATE runs SET status = 'error', finished_at = ?2, error = ?3 WHERE id = ?1",
                 params![run_id, finished_at, error],
@@ -369,7 +379,7 @@ impl RunStore {
     pub async fn list_runs(&self, game: Option<&Game>) -> Result<Vec<StoredRun>, String> {
         let game_type = game.map(|g| g.name().to_owned());
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut statement = conn
                 .prepare(
                     "SELECT id, game_type, status, agents_json, result_json, matrix_job_id
@@ -390,7 +400,7 @@ impl RunStore {
     pub async fn list_batches(&self, mode: &str) -> Result<Vec<BatchSummary>, String> {
         let mode = mode.to_owned();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             // Older batches were all recorded as matrix jobs.
             let mut query = conn.prepare(
                 "SELECT matrix_job_id, game_type, count(*), count(*) FILTER (WHERE status IN ('completed', 'error'))
@@ -412,7 +422,7 @@ impl RunStore {
         let mode = mode.to_owned();
         let game_type = game.name().to_owned();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut query = conn.prepare(
                 "WITH batches AS (
                     SELECT matrix_job_id, count(*) AS total,
@@ -439,7 +449,7 @@ impl RunStore {
     pub async fn batch_sessions(&self, mode: &str, id: &str) -> Result<Vec<BatchSession>, String> {
         let (mode, id) = (mode.to_owned(), id.to_owned());
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut query = conn
                 .prepare(
                     "SELECT id, game_type, status, agents_json, metadata_json FROM runs
@@ -471,7 +481,7 @@ impl RunStore {
     pub async fn parent_batch(&self, run_id: &str) -> Result<Option<(String, String)>, String> {
         let id = run_id.to_owned();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut query = conn.prepare(
                 "SELECT coalesce(batch_mode, 'matrix'), matrix_job_id FROM runs WHERE id = ?1 AND matrix_job_id IS NOT NULL"
             ).map_err(|err| err.to_string())?;
@@ -484,8 +494,8 @@ impl RunStore {
     pub async fn recent_single_results(&self, game: &Game) -> Result<Vec<RunMetrics>, String> {
         let game_type = game.name().to_owned();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
-            finished_run_metrics(&conn, &game_type, 3, 0, true)
+            ensure_schema(conn)?;
+            finished_run_metrics(conn, &game_type, 3, 0, true)
         })
         .await
     }
@@ -494,7 +504,7 @@ impl RunStore {
     pub async fn game_history(&self, game: &Game, page: u32) -> Result<GameHistory, String> {
         let game_type = game.name().to_owned();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut history = conn
                 .query_row(
                     "SELECT count(*) FILTER (WHERE status = 'completed'),
@@ -516,7 +526,7 @@ impl RunStore {
                 .map_err(|err| err.to_string())?;
             let offset = i64::from(page.saturating_sub(1)) * i64::from(HISTORY_PAGE_SIZE);
             history.runs =
-                finished_run_metrics(&conn, &game_type, HISTORY_PAGE_SIZE, offset, false)?;
+                finished_run_metrics(conn, &game_type, HISTORY_PAGE_SIZE, offset, false)?;
             Ok(history)
         })
         .await
@@ -525,7 +535,7 @@ impl RunStore {
     pub async fn get_run(&self, run_id: &str) -> Result<Option<StoredRun>, String> {
         let run_id = run_id.to_string();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut statement = conn
                 .prepare(
                     "SELECT id, game_type, status, agents_json, result_json, matrix_job_id
@@ -544,7 +554,7 @@ impl RunStore {
     pub async fn list_turns(&self, run_id: &str) -> Result<Vec<StoredTurn>, String> {
         let run_id = run_id.to_string();
         self.with_connection(move |conn| {
-            ensure_schema(&conn)?;
+            ensure_schema(conn)?;
             let mut statement = conn
                 .prepare(
                     "SELECT seq, turn_number, player, move_json, valid, error,
@@ -623,19 +633,24 @@ impl RunStore {
     async fn with_connection<T, F>(&self, task: F) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(Connection) -> Result<T, String> + Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, String> + Send + 'static,
     {
-        let _guard = self.lock.lock().await;
-        let path = self.path.as_ref().clone();
-        tokio::task::spawn_blocking(move || {
-            if let Some(parent) = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-            {
-                std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+        let mut backend = self.backend.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || match &mut *backend {
+            Database::File(path) => {
+                if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut conn = Connection::open(path).map_err(|e| e.to_string())?;
+                task(&mut conn)
             }
-            let conn = Connection::open(Path::new(&path)).map_err(|err| err.to_string())?;
-            task(conn)
+            Database::Memory(slot) => {
+                let conn = match slot {
+                    Some(conn) => conn,
+                    None => slot.insert(Connection::open_in_memory().map_err(|e| e.to_string())?),
+                };
+                task(conn)
+            }
         })
         .await
         .map_err(|err| err.to_string())?

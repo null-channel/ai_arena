@@ -169,11 +169,16 @@ async fn game_page(
     let (game, events) = game_detail(&state, &game_id).await?;
     let fragment = htmx::render_game_fragment(&game, &events)?;
     let parent = state
-        .store
+        .game_store(&game_id)
+        .await
         .parent_batch(&game_id)
         .await
         .map_err(AppError::Internal)?;
-    Ok(Html(htmx::render_game_page(&fragment, parent)))
+    Ok(Html(htmx::render_game_page(
+        state.mode(),
+        &fragment,
+        parent,
+    )))
 }
 
 async fn game_fragment(
@@ -393,6 +398,7 @@ mod tests {
         state.games.lock().await.insert(
             game_id.clone(),
             GameSession {
+                mode: crate::server::state::ArenaMode::Test,
                 game_type: "TicTacToe".to_string(),
                 game: Game::new("TicTacToe").unwrap(),
                 agents: Vec::new(),
@@ -466,6 +472,7 @@ mod tests {
         state.games.lock().await.insert(
             game_id.clone(),
             GameSession {
+                mode: crate::server::state::ArenaMode::Test,
                 game_type: "TicTacToe".to_string(),
                 game: Game::new("TicTacToe").unwrap(),
                 agents: Vec::new(),

@@ -2,12 +2,14 @@ use super::{
     boards::render_human_state,
     layout::{html_escape, layout, render_status_badge},
 };
+use crate::server::state::ArenaMode;
 use crate::{
     server::sessions::GameStatus,
     storage::{StoredRun, StoredTurn},
 };
 
 pub(in crate::server) fn render_replay_page(
+    arena_mode: ArenaMode,
     game_id: &str,
     run: &StoredRun,
     events: &[StoredTurn],
@@ -63,5 +65,5 @@ pub(in crate::server) fn render_replay_page(
     }
 
     content.push_str("</section></main>");
-    layout("AI Arena Replay", &content)
+    layout(arena_mode, "AI Arena Replay", &content)
 }

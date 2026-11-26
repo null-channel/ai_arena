@@ -2,14 +2,20 @@ use super::{
     forms::{game_filters, game_label},
     layout::{html_escape, layout},
 };
+use crate::server::state::ArenaMode;
 use crate::storage::LeaderboardEntry;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use std::fmt::Write;
 
-pub(in crate::server) fn render_rankings_page(game: &str, scores: &str) -> String {
+pub(in crate::server) fn render_rankings_page(
+    arena_mode: ArenaMode,
+    game: &str,
+    scores: &str,
+) -> String {
     let filters = game_filters("/rankings", game);
     let label = game_label(game);
     layout(
+        arena_mode,
         "Leaderboard",
         &format!(
             r#"<main>

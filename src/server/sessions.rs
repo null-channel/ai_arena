@@ -1,4 +1,7 @@
-use super::{error::AppError, state::AppState};
+use super::{
+    error::AppError,
+    state::{AppState, ArenaMode},
+};
 use crate::{
     agent_config::AIAgentConfig,
     games::{
@@ -14,6 +17,7 @@ use tokio::sync::mpsc;
 
 // Game session tracking
 pub struct GameSession {
+    pub(super) mode: ArenaMode,
     pub game_type: String,
     pub game: Game,
     pub agents: Vec<AIAgentConfig>,
@@ -23,8 +27,9 @@ pub struct GameSession {
 }
 
 impl GameSession {
-    pub(super) fn pending(game: Game, agents: Vec<AIAgentConfig>) -> Self {
+    pub(super) fn pending(game: Game, agents: Vec<AIAgentConfig>, mode: ArenaMode) -> Self {
         Self {
+            mode,
             game_type: game.name().to_owned(),
             game,
             agents,
@@ -76,6 +81,7 @@ impl GameStatus {
 }
 
 pub(super) struct GameSummary {
+    pub(super) mode: ArenaMode,
     pub(super) game_id: String,
     pub(super) game_type: String,
     pub(super) agents: Vec<AIAgentConfig>,
@@ -86,6 +92,7 @@ pub(super) struct GameSummary {
 impl GameSummary {
     fn from_session(game_id: &str, session: &GameSession) -> Self {
         Self {
+            mode: session.mode,
             game_id: game_id.to_owned(),
             game_type: session.game_type.clone(),
             agents: session.agents.clone(),
@@ -98,6 +105,7 @@ impl GameSummary {
 impl From<StoredRun> for GameSummary {
     fn from(run: StoredRun) -> Self {
         Self {
+            mode: ArenaMode::Real,
             game_id: run.id,
             game_type: run.game_type,
             agents: run.agents,
@@ -146,19 +154,20 @@ pub(super) async fn create_game_session(
 ) -> Result<String, AppError> {
     let game = Game::new(&game_type)
         .ok_or_else(|| AppError::BadRequest("Invalid game type".to_string()))?;
+    let mode = state.mode();
     let game_id = state
-        .store
+        .result_store(mode)
         .create_run(&game, &agents, Some(RunMetadata::source("web")))
         .await
         .map_err(AppError::Internal)?;
 
-    let session = GameSession::pending(game, agents);
+    let session = GameSession::pending(game, agents, mode);
     state.games.lock().await.insert(game_id.clone(), session);
     Ok(game_id)
 }
 
 pub(super) async fn run_session(state: AppState, game_id: String) {
-    let (game, agents) = {
+    let (game, agents, mode) = {
         let mut games = state.games.lock().await;
         let Some(session) = games.get_mut(&game_id) else {
             return;
@@ -169,10 +178,10 @@ pub(super) async fn run_session(state: AppState, game_id: String) {
         }
 
         session.status = GameStatus::Running;
-        (session.game.clone(), session.agents.clone())
+        (session.game.clone(), session.agents.clone(), session.mode)
     };
 
-    if let Err(error) = state.store.mark_running(&game_id).await {
+    if let Err(error) = state.result_store(mode).mark_running(&game_id).await {
         eprintln!(
             "Failed to mark DuckDB run {} as running: {}",
             game_id, error
@@ -199,13 +208,17 @@ pub(super) async fn run_session(state: AppState, game_id: String) {
     let (final_result, ()) = tokio::join!(game_future, record_events);
     match &final_result {
         Ok(result) => {
-            if let Err(error) = state.store.complete_run(&game_id, result).await {
+            if let Err(error) = state
+                .result_store(mode)
+                .complete_run(&game_id, result)
+                .await
+            {
                 eprintln!("Failed to store DuckDB run {}: {}", game_id, error);
             }
         }
         Err(_) => {
             if let Err(error) = state
-                .store
+                .result_store(mode)
                 .mark_error(&game_id, "game execution panicked")
                 .await
             {

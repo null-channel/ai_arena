@@ -1,3 +1,4 @@
+use super::state::ArenaMode;
 mod chat;
 mod content;
 use axum::body::Bytes;
@@ -102,6 +103,7 @@ enum RoundState {
 }
 
 struct Round {
+    mode: ArenaMode,
     record: ResultRecord,
     media: Bytes,
     mime: &'static str,
@@ -116,6 +118,18 @@ struct Round {
 impl Round {
     fn active(&self) -> bool {
         matches!(self.state, RoundState::Live | RoundState::Saving)
+    }
+
+    async fn reveal(&mut self, results: &Path) -> io::Result<()> {
+        if self.mode == ArenaMode::Real {
+            let id = self.record.id;
+            let tmp = results.join(format!("{id}.tmp"));
+            fs::write(&tmp, serde_json::to_vec(&self.record)?).await?;
+            fs::rename(tmp, results.join(format!("{id}.json"))).await?;
+        }
+        self.state = RoundState::Revealed;
+        self.warning.clear();
+        Ok(())
     }
 
     fn ingest(&mut self, events: &[Event]) {
@@ -200,6 +214,7 @@ pub(super) struct Stage {
     pub warning: String,
     pub answer: String,
     pub turnout: usize,
+    pub test_round: bool,
     pub human: usize,
     pub ai: usize,
     pub verdict: String,
@@ -275,7 +290,13 @@ impl Turing {
         ))
     }
 
-    pub async fn start(&self, artifact: &str, review: u32, voting: u32) -> Result<(), String> {
+    pub async fn start(
+        &self,
+        artifact: &str,
+        review: u32,
+        voting: u32,
+        mode: ArenaMode,
+    ) -> Result<(), String> {
         if !(1..=1800).contains(&review) || !(1..=1800).contains(&voting) {
             return Err("Use 1–1800 seconds for each phase.".into());
         }
@@ -292,9 +313,11 @@ impl Turing {
         if sample.mime == "text/plain" && std::str::from_utf8(&media).is_err() {
             return Err("Text samples must be UTF-8.".into());
         }
-        fs::create_dir_all(&self.results)
-            .await
-            .map_err(|e| format!("Cannot open the results directory: {e}"))?;
+        if mode == ArenaMode::Real {
+            fs::create_dir_all(&self.results)
+                .await
+                .map_err(|e| format!("Cannot open the results directory: {e}"))?;
+        }
         let bridge = ChatSettings::load().await?.url;
         let (channel, events) = self.connect_chat(&bridge).await?;
         let mut live = self.live.lock().await;
@@ -305,6 +328,7 @@ impl Turing {
         let opens = started + i64::from(review) * 1000;
         let id = Uuid::new_v4();
         *live = Some(Round {
+            mode,
             record: ResultRecord {
                 id,
                 title: sample.title,
@@ -364,19 +388,10 @@ impl Turing {
                 }
                 None => {}
             }
-            let tmp = self.results.join(format!("{id}.tmp"));
-            let path = self.results.join(format!("{id}.json"));
-            let save = async {
-                fs::write(&tmp, serde_json::to_vec(&round.record)?).await?;
-                fs::rename(tmp, path).await
-            }
-            .await;
-            if let Err(e) = save {
+            if let Err(e) = round.reveal(&self.results).await {
                 round.warning = format!("Could not save scores: {e}");
                 continue;
             }
-            round.state = RoundState::Revealed;
-            round.warning.clear();
             return;
         }
     }
@@ -433,6 +448,7 @@ impl Turing {
             warning: r.warning.clone(),
             active: r.active(),
             turnout: r.record.votes.len(),
+            test_round: r.mode == ArenaMode::Test,
             ..Default::default()
         };
         if s.kind == "text" {
@@ -512,6 +528,7 @@ mod tests {
 
     fn round() -> Round {
         Round {
+            mode: ArenaMode::Real,
             record: ResultRecord {
                 id: Uuid::new_v4(),
                 title: "Sample".into(),
@@ -566,6 +583,24 @@ mod tests {
         assert!(r.record.votes["second"].choice == Answer::AI);
         r.ingest(&[vote("9", 1900, "other", "!vote ai")]);
         assert!(!r.active());
+    }
+
+    #[tokio::test]
+    async fn test_votes_reveal_without_writing_results_or_changing_standings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let turing = Turing {
+            results: tmp.path().join("results"),
+            ..Default::default()
+        };
+        let mut practice = round();
+        practice.mode = ArenaMode::Test;
+        practice.ingest(&[vote("1", 1400, "viewer", "!vote human")]);
+        practice.reveal(&turing.results).await.unwrap();
+        *turing.live.lock().await = Some(practice);
+        let stage = turing.stage().await;
+        assert_eq!((stage.phase, stage.human), ("Reveal", 1));
+        assert!(!turing.results.exists());
+        assert!(turing.scores(false).await.unwrap().is_empty());
     }
 
     #[tokio::test]

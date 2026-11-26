@@ -3,6 +3,7 @@ use super::{
     layout::{html_escape, layout},
 };
 use crate::server::config::RunMode;
+use crate::server::state::ArenaMode;
 use crate::storage::{BatchResult, GameHistory, HISTORY_PAGE_SIZE, RunMetrics};
 
 pub(in crate::server) fn render_recent_results(game: &str, runs: &[RunMetrics]) -> String {
@@ -50,7 +51,12 @@ pub(in crate::server) fn render_recent_batches(
     html
 }
 
-pub(in crate::server) fn render_history(game: &str, page: u32, history: GameHistory) -> String {
+pub(in crate::server) fn render_history(
+    arena_mode: ArenaMode,
+    game: &str,
+    page: u32,
+    history: GameHistory,
+) -> String {
     let filters = game_filters("/history", game);
     let heading = game_label(game);
     let mut content = format!(
@@ -106,7 +112,7 @@ pub(in crate::server) fn render_history(game: &str, page: u32, history: GameHist
         ));
     }
     content.push_str("</nav></section></main>");
-    layout("Run history", &content)
+    layout(arena_mode, "Run history", &content)
 }
 
 fn count(value: Option<i64>) -> String {

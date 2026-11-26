@@ -56,7 +56,14 @@ pub(super) async fn batch_activity(
         .list_batches(mode.path().trim_start_matches('/'))
         .await
         .map_err(AppError::Internal)?;
-    Ok(Html(htmx::render_batch_activity(mode, &batches)))
+    let rehearsal = state
+        .test_store
+        .list_batches(mode.path().trim_start_matches('/'))
+        .await
+        .map_err(AppError::Internal)?;
+    Ok(Html(htmx::render_batch_activity(
+        mode, &rehearsal, &batches,
+    )))
 }
 
 async fn batch_page(
@@ -64,21 +71,22 @@ async fn batch_page(
     Extension(mode): Extension<RunMode>,
     Path(id): Path<String>,
 ) -> Result<Html<String>, AppError> {
+    let job_mode = state.matrix_jobs.lock().await.get(&id).map(|job| job.mode);
     let sessions = state
-        .store
+        .result_store(job_mode.unwrap_or(crate::server::state::ArenaMode::Real))
         .batch_sessions(mode.path().trim_start_matches('/'), &id)
         .await
         .map_err(AppError::Internal)?;
     let first = sessions
         .first()
         .ok_or_else(|| AppError::NotFound("Batch not found".into()))?;
-    let active = state.matrix_jobs.lock().await.contains_key(&id);
     Ok(Html(htmx::render_batch_page(
+        state.mode(),
         mode,
         &id,
         &first.game_type,
         &sessions,
-        active,
+        job_mode,
     )))
 }
 

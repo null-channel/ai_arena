@@ -20,7 +20,11 @@ async fn rankings_page(
 ) -> Result<Html<String>, AppError> {
     let game = query.selected_game()?;
     let scores = htmx::render_leaderboard_fragment(state.store.leaderboard(Some(&game)).await);
-    Ok(Html(htmx::render_rankings_page(game.name(), &scores)))
+    Ok(Html(htmx::render_rankings_page(
+        state.mode(),
+        game.name(),
+        &scores,
+    )))
 }
 
 async fn leaderboard_fragment(

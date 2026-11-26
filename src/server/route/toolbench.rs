@@ -76,7 +76,7 @@ async fn setup(
     }
     .render()
     .map_err(internal)?;
-    Ok(Html(layout("Tool Calling", &content)))
+    Ok(Html(layout(state.mode(), "Tool Calling", &content)))
 }
 
 #[derive(serde::Deserialize)]
@@ -106,7 +106,7 @@ async fn start(
     State(state): State<AppState>,
     Form(settings): Form<Settings>,
 ) -> Result<Response, AppError> {
-    match state.toolbench.start(settings.clone()).await {
+    match state.toolbench.start(settings.clone(), state.mode()).await {
         Ok(id) => Ok(Redirect::to(&format!("/toolbench/{id}")).into_response()),
         Err(error) => Ok((
             StatusCode::BAD_REQUEST,
@@ -151,7 +151,7 @@ async fn detail(
     }
     .render()
     .map_err(internal)?;
-    Ok(Html(layout("Tool Calling", &content)))
+    Ok(Html(layout(state.mode(), "Tool Calling", &content)))
 }
 
 fn internal(error: impl std::fmt::Display) -> AppError {

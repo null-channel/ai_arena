@@ -1,7 +1,7 @@
 use super::{
     error::AppError,
     sessions::{GameSession, GameStatus, run_session},
-    state::AppState,
+    state::{AppState, ArenaMode},
 };
 use crate::agent_config::AIAgentConfig;
 use crate::{games::game::Game, storage::RunMetadata};
@@ -37,6 +37,7 @@ pub struct MatrixRun {
 
 #[derive(Debug, Clone)]
 pub(super) struct MatrixJob {
+    pub(super) mode: ArenaMode,
     id: String,
     game_type: String,
     concurrency_limit: usize,
@@ -144,8 +145,9 @@ pub(super) async fn create_matrix_job(
             (agents, Some(metadata))
         })
         .collect();
+    let arena_mode = state.mode();
     let ids = state
-        .store
+        .result_store(arena_mode)
         .create_runs(&game, configurations)
         .await
         .map_err(AppError::Internal)?;
@@ -162,11 +164,16 @@ pub(super) async fn create_matrix_job(
         });
         sessions.insert(
             id,
-            GameSession::pending(game.clone(), vec![first.clone(), second.clone()]),
+            GameSession::pending(
+                game.clone(),
+                vec![first.clone(), second.clone()],
+                arena_mode,
+            ),
         );
     }
     drop(sessions);
     let job = MatrixJob {
+        mode: arena_mode,
         id: matrix_id.clone(),
         game_type: request.game_type,
         concurrency_limit,
@@ -281,6 +288,7 @@ mod tests {
         state.matrix_jobs.lock().await.insert(
             "matrix-test".to_string(),
             MatrixJob {
+                mode: ArenaMode::Test,
                 id: "matrix-test".to_string(),
                 game_type: "TicTacToe".to_string(),
                 concurrency_limit: 2,
