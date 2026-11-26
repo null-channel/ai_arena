@@ -1,0 +1,15 @@
+<main class="stack">
+    <div class="panel-heading"><h1>Turing Test</h1><div class="actions"><a href="/turing/screen" target="_blank" rel="noopener">Audience screen ↗</a><a href="/turing/scores">Viewer standings</a></div></div>
+    <div class="grid">{% include "turing_stage.html" %}
+    <section class="panel"><h2>Round setup</h2>
+        {% if !error.is_empty() %}<p class="notice failure" role="alert">{{ error }}</p>{% endif %}
+        {{ chat|safe }}
+        {% if samples.is_empty() %}<p class="empty">No playable samples in the content library.</p>{% else %}
+        <form class="bench-form turing-setup" action="/turing" method="post">
+            <label>Sample<select name="artifact" required>{% for sample in samples %}<option value="{{ sample.id }}"{% if sample.id == setup.artifact %} selected{% endif %}>{{ sample.title }} · {{ sample.mime }}</option>{% endfor %}</select></label>
+            <label>Review (seconds)<input type="number" name="review" min="1" max="1800" value="{{ setup.review }}" required></label>
+            <label>Voting (seconds)<input type="number" name="voting" min="1" max="1800" value="{{ setup.voting }}" required></label>
+            <button type="submit">Start round</button>
+        </form>{% endif %}
+    </section></div>
+</main>

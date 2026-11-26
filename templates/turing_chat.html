@@ -1,0 +1,9 @@
+<details id="turing-chat" class="turing-chat"{% if open %} open{% endif %}>
+    <summary>Twitch connection</summary>
+    <form class="bench-form" method="post" action="/turing/chat" hx-post="/turing/chat" hx-target="#turing-chat" hx-swap="outerHTML">
+        <label>Twitch Interactions URL<input type="url" name="url" required value="{{ url }}" spellcheck="false" autocomplete="off"></label>
+        <p class="board-meta">Twitch Interactions reads <code>~/.twitch_chat</code> on the service host at startup.</p>
+        <div class="actions"><button type="submit" name="action" value="save">Save URL</button><button class="roster-action" type="submit" name="action" value="test">Test connection</button></div>
+        {% if !message.is_empty() %}<p class="notice {% if failed %}failure{% else %}success{% endif %}" role="status">{{ message }}</p>{% endif %}
+    </form>
+</details>

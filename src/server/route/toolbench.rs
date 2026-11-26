@@ -1,3 +1,4 @@
+use super::private_response;
 use crate::server::{
     error::AppError,
     htmx::layout,
@@ -8,8 +9,8 @@ use askama::Template;
 use axum::{
     Form, Json, Router,
     extract::{Path, State},
-    http::{StatusCode, header},
-    middleware::{self, Next},
+    http::StatusCode,
+    middleware,
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -22,35 +23,6 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/toolbench/history", get(history))
         .route("/toolbench/{id}", get(detail))
         .route_layer(middleware::from_fn(private_response))
-}
-
-async fn private_response(request: axum::extract::Request, next: Next) -> Response {
-    // Toolbench can send private cases to a selected model endpoint. Browser
-    // requests with an Origin must come from the Arena that serves the form.
-    if let Some(origin) = request.headers().get(header::ORIGIN) {
-        let authority = origin
-            .to_str()
-            .ok()
-            .and_then(|s| s.parse::<axum::http::Uri>().ok());
-        let host = request
-            .headers()
-            .get(header::HOST)
-            .and_then(|v| v.to_str().ok())
-            .or_else(|| request.uri().host());
-        if !authority
-            .as_ref()
-            .and_then(|uri| uri.authority())
-            .zip(host)
-            .is_some_and(|(origin, host)| origin.as_str().eq_ignore_ascii_case(host))
-        {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-    }
-    let mut response = next.run(request).await;
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
-    response
 }
 
 #[derive(Template)]

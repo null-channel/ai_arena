@@ -197,3 +197,15 @@ pre { padding: 12px; border-radius: 2px; background: var(--subtle); overflow: au
 .model-chips button { padding: 5px 8px; background: transparent; color: var(--ink); }
 .model-chips button:hover { color: var(--accent); }
 [data-model-feedback]:not(:empty) { margin-top: 8px; }
+
+.turing-setup { margin-top: 18px; }
+.stage-clock { color: var(--accent); font: 600 1.5rem var(--mono); }
+.stage-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: clamp(1.1rem, 2vw, 1.65rem); margin: 18px 0; }
+.stage-art { display: block; max-width: 100%; max-height: 64vh; margin: 16px auto; }
+.stage audio { margin: 16px 0; max-width: 100%; }
+.stage-prompt, .stage-reveal { background: var(--subtle); padding: 14px; margin-top: 16px; }
+.stage-prompt code, .stage-reveal h3 { color: var(--accent); font-size: 1.15rem; }
+.stage form { margin-top: 14px; }
+.turing-chat { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.turing-chat .bench-form { margin: 12px 0; gap: 10px; }
+.turing-chat .actions, .turing-chat .board-meta { margin-top: 0; }

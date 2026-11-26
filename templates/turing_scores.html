@@ -1,0 +1,12 @@
+<main class="stack">
+    <a class="back-link" href="/turing">← Turing Test</a>
+    <section class="panel"><div class="panel-heading"><h1>Viewer standings</h1><nav class="switch" aria-label="Sort by accuracy">
+        <a href="/turing/scores"{% if !lowest %} aria-current="page"{% endif %}>Highest first</a>
+        <a href="/turing/scores?order=lowest"{% if lowest %} aria-current="page"{% endif %}>Lowest first</a>
+    </nav></div>
+    {% if rows.is_empty() %}<p class="empty">No votes scored yet.</p>{% else %}
+    <p class="recent-game">Chat identified the source correctly on {{ correct }} of {{ total }} votes overall.</p>
+    <div class="table-scroll"><table><thead><tr><th>Viewer</th><th>Accuracy</th><th>Correct</th><th>Incorrect</th><th>Rounds voted</th></tr></thead>
+        <tbody>{% for row in rows %}<tr><td>{{ row.login }}</td><td>{{ row.accuracy() }}</td><td>{{ row.correct }}</td><td>{{ row.total - row.correct }}</td><td>{{ row.total }}</td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}</section>
+</main>

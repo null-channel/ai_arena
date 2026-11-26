@@ -1,0 +1,14 @@
+<section class="panel stage" id="turing-stage" hx-get="/turing/stage?host={{ host }}" hx-trigger="every 1s" hx-swap="outerHTML">
+    <div class="panel-heading"><h2>{{ stage.phase }}</h2>{% if stage.seconds > 0 %}<strong class="stage-clock">{{ stage.seconds }} s</strong>{% endif %}</div>
+    {% if !stage.id.is_empty() %}
+    <h3>{{ stage.title }}</h3>
+    {% if stage.kind == "text" %}<div class="stage-text">{{ stage.text }}</div>
+    {% else if stage.kind == "image" %}<img class="stage-art" id="sample-{{ stage.id }}" hx-preserve src="/turing/{{ stage.id }}/media" alt="{{ stage.title }}">
+    {% else if stage.kind == "audio" %}<audio controls id="sample-{{ stage.id }}" hx-preserve src="/turing/{{ stage.id }}/media"></audio>{% endif %}
+    {% if stage.phase == "Review" %}<p>Human or AI? Voting opens after review.</p>{% endif %}
+    {% if stage.phase == "Vote" %}<p class="stage-prompt">Vote in #{{ stage.channel }} with <code>!vote human</code> or <code>!vote ai</code> · {{ stage.turnout }} voted</p>{% endif %}
+    {% if !stage.answer.is_empty() %}<div class="stage-reveal"><h3>{% if stage.answer == "AI" %}AI-generated{% else %}Human-made{% endif %}</h3><p>{{ stage.verdict }} · Human {{ stage.human }} · AI {{ stage.ai }}</p></div>{% endif %}
+    {% if !stage.warning.is_empty() %}<p class="notice failure" role="status">{{ stage.warning }}</p>{% endif %}
+    {% if host && stage.active %}<form method="post" action="/turing/{{ stage.id }}/cancel"><button class="roster-action">Cancel round</button></form>{% endif %}
+    {% endif %}
+</section>

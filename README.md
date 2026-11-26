@@ -134,6 +134,30 @@ The picker starts with Arena presets. **Save & add** writes the full list to the
 
 Build the runner in its own checkout with `cargo build --bin toolbench` if needed. Keep the dataset external. Each run gets its own external directory for its report, call log, runner diagnostics and local bundle. Arena's game database stores game results only.
 
+### Twitch Turing Test
+
+Start the shared Twitch Interactions service from the Arena checkout with `../twitch-interactions/quickstart.sh`. On the machine running that service, put `TC_USERNAME` and `TC_PASSWORD` (a Twitch OAuth access token) in `~/.twitch_chat`. You can also set `TC_CHANNEL` there. The service reads the file at startup and accepts plain or `export` assignments. Environment variables override the corresponding file values.
+
+In Arena, open **Turing Test → Round setup → Twitch connection**. Enter the service URL as seen from the Arena server. **Test connection** checks the channel and event feed. **Save URL** stores the address in the Arena configuration directory under `ai_arena/turing-chat.toml` for future rounds. A round in progress keeps its original connection.
+
+Choose a sample and set review and voting times. Put **Audience screen** (`/turing/screen`) on stream or in OBS. When the countdown changes from **Review** to **Vote**, viewers can type `!vote human` or `!vote ai`. The last valid choice from each Twitch user ID within the voting window counts. At reveal, the screen shows the source, vote totals, and chat’s verdict.
+
+**Viewer standings** (`/turing/scores`) ranks accuracy across completed rounds, with highest-first and lowest-first views. Ties use participation then login. Viewers who skip a round receive no score for it. Completed results survive restarts. Cancelled rounds, interrupted rounds and rounds with missing chat history do not enter the standings.
+
+| Server environment variable | Default |
+| --- | --- |
+| `ARENA_TWITCH_URL` | `http://127.0.0.1:8787` (used until a service URL is saved in Arena) |
+| `ARENA_TURING_CONTENT` | The sibling summer event library, `../../2026/summer/events/turing-test/content` relative to the Arena checkout |
+| `ARENA_TURING_RESULTS` | The local user data directory under `ai-arena/turing/`, one JSON file per scored round |
+
+To add a sample, create a folder under `text/`, `art_visual/`, `voice/`, or `music/` in the content library. Put the media and a `metadata.json` in that folder. For example:
+
+```json
+{"id":"postcard-01","title":"Postcard","true_source":"Human","display_file":"postcard.png"}
+```
+
+Use `AI` or `Human` for the source and a neutral title for viewers. Supported files include plain text and Markdown (displayed as text), PNG, JPEG, WebP, GIF, SVG and audio. A `transcript_file` can stand in for a missing display file. The event library includes rehearsal material. Select samples with known provenance for a scored stream.
+
 ### DuckDB Run History
 
 All game runs are stored in DuckDB. By default the database file is `./ai_arena.duckdb`, relative to the current working directory. Use `--db-path` on `run`, `batch`, or `serve` to choose a different file.

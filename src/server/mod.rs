@@ -7,6 +7,7 @@ mod route;
 mod sessions;
 mod state;
 mod toolbench;
+mod turing;
 
 #[cfg(test)]
 mod test;
